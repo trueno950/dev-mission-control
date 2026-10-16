@@ -37,6 +37,11 @@ func date(_ y: Int, _ m: Int, _ d: Int) -> Date {
     cal.date(from: DateComponents(year: y, month: m, day: d, hour: 12))!
 }
 
+func dateTime(_ y: Int, _ m: Int, _ d: Int, _ hh: Int, _ mm: Int = 0, _ ss: Int = 0) -> Date {
+    cal.date(from: DateComponents(year: y, month: m, day: d,
+                                  hour: hh, minute: mm, second: ss))!
+}
+
 let sharedNow = date(2026, 10, 16)
 let sharedThresholds = AppConfig(refreshIntervalMinutes: 5, staleWorktreeDays: 7,
                                  stalePRDays: 7, inactivityDays: 14)
@@ -267,7 +272,7 @@ func attentionMathTests() {
 attentionMathTests()
 gitScannerTests()
 ghScannerTests()
-// engramScannerTests() // T5
+engramScannerTests()
 // ghScannerTests()    // T4
 // engramScannerTests() // T5
 

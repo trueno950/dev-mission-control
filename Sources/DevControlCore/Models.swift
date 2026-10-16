@@ -43,6 +43,8 @@ public struct AppConfig: Codable, Hashable, Sendable {
     /// Projects without Engram activity for this many days are flagged.
     public var inactivityDays: Int
 
+    public static let `default` = AppConfig()
+
     public init(repos: [RepoConfig] = [],
                 refreshIntervalMinutes: Int = 5,
                 staleWorktreeDays: Int = 7,
