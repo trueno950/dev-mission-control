@@ -21,6 +21,21 @@ public struct RepoConfig: Codable, Hashable, Sendable, Identifiable {
         self.enabled = enabled
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, path, githubSlug, engramProject, enabled
+    }
+
+    /// Tolerant decoding: new optional keys and omitted booleans fall back to
+    /// defaults instead of failing the whole config file.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        path = try container.decode(String.self, forKey: .path)
+        githubSlug = try container.decodeIfPresent(String.self, forKey: .githubSlug)
+        engramProject = try container.decodeIfPresent(String.self, forKey: .engramProject)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+
     /// Folder name of the repository path.
     public var folderName: String {
         (path as NSString).lastPathComponent
@@ -44,6 +59,26 @@ public struct AppConfig: Codable, Hashable, Sendable {
     public var inactivityDays: Int
 
     public static let `default` = AppConfig()
+
+    private enum CodingKeys: String, CodingKey {
+        case repos, refreshIntervalMinutes, staleWorktreeDays, stalePRDays, inactivityDays
+    }
+
+    /// Tolerant decoding: omitted numeric settings fall back to defaults so a
+    /// config written by an older version keeps loading.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        repos = try container.decodeIfPresent([RepoConfig].self, forKey: .repos) ?? []
+        let config = AppConfig()
+        refreshIntervalMinutes = try container.decodeIfPresent(Int.self,
+            forKey: .refreshIntervalMinutes) ?? config.refreshIntervalMinutes
+        staleWorktreeDays = try container.decodeIfPresent(Int.self,
+            forKey: .staleWorktreeDays) ?? config.staleWorktreeDays
+        stalePRDays = try container.decodeIfPresent(Int.self,
+            forKey: .stalePRDays) ?? config.stalePRDays
+        inactivityDays = try container.decodeIfPresent(Int.self,
+            forKey: .inactivityDays) ?? config.inactivityDays
+    }
 
     public init(repos: [RepoConfig] = [],
                 refreshIntervalMinutes: Int = 5,

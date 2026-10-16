@@ -266,6 +266,22 @@ func attentionMathTests() {
     } catch {
         check(false, "config store test threw: \(error)")
     }
+
+    // MARK: Tolerant decoding (older/partial config files)
+
+    do {
+        let minimalJSON = """
+        {"repos": [{"id": "demo", "path": "/tmp/demo"}]}
+        """
+        let decoded = try JSONDecoder().decode(AppConfig.self,
+                                               from: Data(minimalJSON.utf8))
+        checkEqual(decoded.repos.count, 1, "minimal config decodes repos")
+        checkEqual(decoded.repos[0].enabled, true, "omitted enabled defaults to true")
+        checkEqual(decoded.refreshIntervalMinutes, 5, "omitted refresh interval falls back to default")
+        checkEqual(decoded.staleWorktreeDays, 7, "omitted threshold falls back to default")
+    } catch {
+        check(false, "tolerant decode test threw: \(error)")
+    }
 }
 
 // Suites wired per task:
