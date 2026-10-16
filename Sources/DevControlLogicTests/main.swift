@@ -7,6 +7,9 @@ import DevControlCore
 var failures = 0
 var total = 0
 
+// Unbuffered stdout so results survive a fatal crash mid-suite.
+setbuf(stdout, nil)
+
 func check(_ condition: Bool, _ label: String) {
     total += 1
     if condition {
@@ -262,7 +265,8 @@ func attentionMathTests() {
 
 // Suites wired per task:
 attentionMathTests()
-// gitScannerTests()   // T3
+gitScannerTests()
+// ghScannerTests()    // T4
 // ghScannerTests()    // T4
 // engramScannerTests() // T5
 
