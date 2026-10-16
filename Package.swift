@@ -5,6 +5,14 @@ let package = Package(
     name: "DevMissionControl",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "DevMissionControl")
+        .target(name: "DevControlCore"),
+        .executableTarget(
+            name: "DevMissionControl",
+            dependencies: ["DevControlCore"]
+        ),
+        .executableTarget(
+            name: "DevControlLogicTests",
+            dependencies: ["DevControlCore"]
+        )
     ]
 )
