@@ -25,7 +25,14 @@ final class AppState: ObservableObject {
     private var refreshTask: Task<Void, Never>?
 
     nonisolated static func makeDefaultStore() -> ConfigStore {
-        if let store = try? ConfigStore(directory: ConfigStore.appSupportDirectory()) {
+        let base: URL
+        if let custom = ProcessInfo.processInfo.environment["DMC_CONFIG_DIR"],
+           !custom.isEmpty {
+            base = URL(fileURLWithPath: custom)
+        } else {
+            base = ConfigStore.appSupportDirectory()
+        }
+        if let store = try? ConfigStore(directory: base) {
             return store
         }
         return try! ConfigStore(directory: FileManager.default.temporaryDirectory)
