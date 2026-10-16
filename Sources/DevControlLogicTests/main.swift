@@ -266,7 +266,8 @@ func attentionMathTests() {
 // Suites wired per task:
 attentionMathTests()
 gitScannerTests()
-// ghScannerTests()    // T4
+ghScannerTests()
+// engramScannerTests() // T5
 // ghScannerTests()    // T4
 // engramScannerTests() // T5
 
