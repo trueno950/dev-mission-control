@@ -89,6 +89,10 @@ final class AppState: ObservableObject {
         let ghScanner = ghScanner
         let engramScanner = engramScanner
         let now = Date()
+        // Snapshot of the last successful reads, used to retain a source's last
+        // valid value marked stale when this refresh fails (S5/S12).
+        let previous = Dictionary(snapshots.map { ($0.config.path, $0) },
+                                  uniquingKeysWith: { _, last in last })
 
         refreshTask = Task { [weak self] in
             var snapshots = await withTaskGroup(of: RepoSnapshot.self) { group in
@@ -99,8 +103,9 @@ final class AppState: ObservableObject {
                                                 slugOverride: repo.githubSlug, now: now)
                         let activity = await engramScanner.scan(
                             project: repo.resolvedEngramProject)
-                        return RepoSnapshot(config: repo, git: git, pr: pr,
-                                            activity: activity)
+                        let snapshot = RepoSnapshot(config: repo, git: git, pr: pr,
+                                                    activity: activity)
+                        return snapshot.retainingLastRead(previous[repo.path])
                     }
                 }
                 var collected: [RepoSnapshot] = []

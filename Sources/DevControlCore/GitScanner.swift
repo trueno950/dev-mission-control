@@ -1,17 +1,28 @@
 import Foundation
+import Darwin
 
 /// Abstraction over external process execution so scanners can be tested
 /// with canned outputs.
 public protocol ProcessRunning {
-    /// Runs a command and returns stdout. Throws on non-zero exit or if the
-    /// binary cannot be launched.
+    /// Runs a command and returns stdout. Throws on non-zero exit, timeout, or
+    /// if the binary cannot be launched.
     func run(_ launchPath: String, _ arguments: [String],
              in directory: String?) throws -> String
 }
 
-/// Real process runner backed by Foundation's `Process`.
+/// Real process runner backed by Foundation's `Process`. Executables are
+/// launched by path with a separate argument vector; repository paths are
+/// never concatenated into a shell command (S8/S12). Every call is bounded by
+/// `timeout` so a hung `git`/`gh` cannot block the scan pipeline (S6).
 public struct ProcessRunner: ProcessRunning {
-    public init() {}
+    /// Upper bound for a single external command when none is supplied.
+    public static let defaultTimeout: TimeInterval = 30
+
+    public let timeout: TimeInterval
+
+    public init(timeout: TimeInterval = ProcessRunner.defaultTimeout) {
+        self.timeout = timeout
+    }
 
     public func run(_ launchPath: String, _ arguments: [String],
                     in directory: String?) throws -> String {
@@ -27,10 +38,45 @@ public struct ProcessRunner: ProcessRunning {
         process.standardOutput = stdout
         process.standardError = stderr
 
+        let processExited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in processExited.signal() }
         try process.run()
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+
+        // Drain both pipes concurrently so a chatty child cannot deadlock on a
+        // full pipe buffer while we wait for the process itself to exit.
+        let collected = OutputCollector()
+        let drains = DispatchGroup()
+        let queue = DispatchQueue(label: "dev.mission-control.process-drain",
+                                  attributes: .concurrent)
+        drains.enter()
+        queue.async {
+            collected.stdout = stdout.fileHandleForReading.readDataToEndOfFile()
+            drains.leave()
+        }
+        drains.enter()
+        queue.async {
+            collected.stderr = stderr.fileHandleForReading.readDataToEndOfFile()
+            drains.leave()
+        }
+
+        // Pipe EOF is not proof that the process exited: a child may close its
+        // output streams and keep running. Bound the process lifetime directly.
+        if processExited.wait(timeout: .now() + timeout) == .timedOut {
+            if process.isRunning { process.terminate() }
+            if processExited.wait(timeout: .now() + 2) == .timedOut {
+                if process.isRunning { _ = kill(process.processIdentifier, SIGKILL) }
+                _ = processExited.wait(timeout: .now() + 2)
+            }
+            _ = drains.wait(timeout: .now() + 2)
+            throw ScannerError.timedOut(launchPath, timeout)
+        }
+
         process.waitUntilExit()
+        guard drains.wait(timeout: .now() + 2) == .success else {
+            throw ScannerError.timedOut(launchPath, timeout)
+        }
+        let data = collected.stdout
+        let errorData = collected.stderr
 
         guard process.terminationStatus == 0 else {
             let message = String(data: errorData, encoding: .utf8) ?? ""
@@ -41,20 +87,41 @@ public struct ProcessRunner: ProcessRunning {
     }
 }
 
+/// Thread-safe sink for the two concurrently drained pipes.
+private final class OutputCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var outData = Data()
+    private var errData = Data()
+
+    var stdout: Data {
+        get { lock.lock(); defer { lock.unlock() }; return outData }
+        set { lock.lock(); outData = newValue; lock.unlock() }
+    }
+
+    var stderr: Data {
+        get { lock.lock(); defer { lock.unlock() }; return errData }
+        set { lock.lock(); errData = newValue; lock.unlock() }
+    }
+}
+
 public enum ScannerError: Error, CustomStringConvertible {
     case commandFailed(String, Int32, String)
+    case timedOut(String, TimeInterval)
 
     public var description: String {
         switch self {
         case let .commandFailed(command, status, message):
             let detail = message.isEmpty ? "no output" : message
             return "\(command) exited \(status): \(detail)"
+        case let .timedOut(command, timeout):
+            return "\(command) timed out after \(Int(timeout.rounded()))s"
         }
     }
 }
 
-/// Scans one local repository with git: branch, dirty file count, unpushed
-/// commit count, and linked worktrees (branch, dirty count, and last-commit age).
+/// Scans one local repository with git: branch, normalized pending-change
+/// counts (staged, unstaged, untracked, conflicts), unpushed commit count, and
+/// linked worktrees (branch, per-worktree change counts, and last-commit age).
 public struct GitScanner {
     private let git: String
     private let runner: ProcessRunning
@@ -76,11 +143,11 @@ public struct GitScanner {
 
         do {
             let branch = try currentBranch(repoPath)
-            let dirtyCount = try dirtyFileCount(repoPath)
+            let changes = try statusChanges(repoPath)
             let unpushedCount = unpushedCommitCount(repoPath)
             let worktrees = try scanWorktrees(repoPath, now: now, calendar: calendar)
-            return GitStatus(branch: branch, dirtyCount: dirtyCount,
-                             unpushedCount: unpushedCount, worktrees: worktrees)
+            return GitStatus(branch: branch, unpushedCount: unpushedCount,
+                             worktrees: worktrees, changes: changes, lastReadAt: now)
         } catch {
             return GitStatus(error: describe(error, for: repoPath))
         }
@@ -95,9 +162,11 @@ public struct GitScanner {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func dirtyFileCount(_ repoPath: String) throws -> Int {
+    /// Normalized staged/unstaged/untracked/conflict counts for one checkout
+    /// or linked worktree, read from `git status --porcelain=v1`.
+    private func statusChanges(_ repoPath: String) throws -> ChangeCounts {
         let output = try runner.run(git, ["-C", repoPath, "status", "--porcelain=v1"], in: nil)
-        return GitParser.countStatusEntries(output)
+        return GitParser.parseChangeCounts(output)
     }
 
     private func unpushedCommitCount(_ repoPath: String) -> Int {
@@ -120,7 +189,7 @@ public struct GitScanner {
         var result: [WorktreeInfo] = []
         for block in linkedBlocks {
             let worktreePath = block.path
-            let dirtyCount = (try? dirtyFileCount(worktreePath)) ?? 0
+            let changes = try statusChanges(worktreePath)
             let lastCommitAt = block.headCommit.flatMap { timestamps[$0] }
             let ageDays: Int
             if let lastCommitAt {
@@ -132,9 +201,9 @@ public struct GitScanner {
             }
             result.append(WorktreeInfo(path: worktreePath,
                                        name: (worktreePath as NSString).lastPathComponent,
-                                       isDirty: dirtyCount > 0, ageDays: ageDays,
-                                       branch: block.branch, dirtyCount: dirtyCount,
-                                       lastCommitAt: lastCommitAt))
+                                       isDirty: changes.isDirty, ageDays: ageDays,
+                                       branch: block.branch, lastCommitAt: lastCommitAt,
+                                       changes: changes))
         }
         return result
     }
@@ -161,7 +230,38 @@ public struct GitScanner {
 public enum GitParser {
     /// Counts entries in `git status --porcelain=v1` output.
     public static func countStatusEntries(_ output: String) -> Int {
-        output.split(separator: "\n", omittingEmptySubsequences: true).count
+        parseChangeCounts(output).pendingFiles
+    }
+
+    /// Normalizes `git status --porcelain=v1` output into staged, unstaged,
+    /// untracked, and conflict counts. Each file is counted once in
+    /// `pendingFiles`; unmerged pairs count only as conflicts, and ignored
+    /// (`!!`) entries are not pending changes.
+    public static func parseChangeCounts(_ output: String) -> ChangeCounts {
+        let unmergedPairs: Set<String> = ["DD", "AU", "UD", "UA", "DU", "AA", "UU"]
+        var counts = ChangeCounts()
+
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let status = String(line.prefix(2))
+            guard status.count == 2 else { continue }
+            let index = status[status.startIndex]
+            let worktree = status[status.index(after: status.startIndex)]
+
+            if index == "!", worktree == "!" {
+                continue // Ignored files are not pending changes.
+            }
+            counts.pendingFiles += 1
+
+            if index == "?", worktree == "?" {
+                counts.untracked += 1
+            } else if unmergedPairs.contains(status) {
+                counts.conflicts += 1
+            } else {
+                if index != " " { counts.staged += 1 }
+                if worktree != " " { counts.unstaged += 1 }
+            }
+        }
+        return counts
     }
 
     /// Parses `git worktree list --porcelain` into blocks. The first block is

@@ -4,6 +4,7 @@ import Foundation
 public struct AttentionItem: Hashable, Sendable, Identifiable {
     public enum Kind: Hashable, Sendable {
         case configError
+        case mergeConflict
         case dirtyFiles
         case unpushedCommits
         case staleWorktree
@@ -53,61 +54,70 @@ public enum AttentionMath {
                                 thresholds: AppConfig) -> [AttentionItem] {
         var items: [AttentionItem] = []
 
-        // Config errors first: a broken path outweighs everything else.
-        if let gitError = snapshot.git.error {
-            items.append(AttentionItem(kind: .configError, severity: .critical,
-                                       message: gitError))
-            return sorted(items)
-        }
+        // Only current reads may establish findings. Failed or stale source
+        // data is surfaced through freshness metadata, never as a clean result
+        // or a current attention alert.
+        if snapshot.git.freshness == .current {
+            if snapshot.git.changes.conflicts > 0 {
+                let count = snapshot.git.changes.conflicts
+                let branch = snapshot.git.branch ?? "primary checkout"
+                let label = count == 1 ? "merge conflict" : "merge conflicts"
+                items.append(AttentionItem(kind: .mergeConflict, severity: .critical,
+                                           message: "\(count) \(label) on \(branch)"))
+            }
 
-        if snapshot.git.dirtyCount > 0 {
-            items.append(AttentionItem(kind: .dirtyFiles, severity: .warning,
-                                       message: "\(snapshot.git.dirtyCount) uncommitted file\(snapshot.git.dirtyCount == 1 ? "" : "s")"))
-        }
+            if snapshot.git.unpushedCount > 0 {
+                let branch = snapshot.git.branch ?? "HEAD"
+                items.append(AttentionItem(kind: .unpushedCommits, severity: .warning,
+                                           message: "\(snapshot.git.unpushedCount) unpushed commit\(snapshot.git.unpushedCount == 1 ? "" : "s") on \(branch)"))
+            }
 
-        if snapshot.git.unpushedCount > 0 {
-            let branch = snapshot.git.branch ?? "HEAD"
-            items.append(AttentionItem(kind: .unpushedCommits, severity: .warning,
-                                       message: "\(snapshot.git.unpushedCount) unpushed commit\(snapshot.git.unpushedCount == 1 ? "" : "s") on \(branch)"))
-        }
-
-        for worktree in snapshot.git.worktrees {
-            if worktree.isDirty {
-                items.append(AttentionItem(kind: .staleWorktree, severity: .warning,
-                                           message: "Worktree \(worktree.name) has uncommitted changes",
-                                           worktreePath: worktree.path))
-            } else if worktree.ageDays > thresholds.staleWorktreeDays {
-                items.append(AttentionItem(kind: .staleWorktree, severity: .info,
-                                           message: "Worktree \(worktree.name) idle \(worktree.ageDays) days",
-                                           worktreePath: worktree.path))
+            for worktree in snapshot.git.worktrees {
+                if worktree.changes.conflicts > 0 {
+                    let count = worktree.changes.conflicts
+                    let label = count == 1 ? "merge conflict" : "merge conflicts"
+                    items.append(AttentionItem(kind: .mergeConflict, severity: .critical,
+                                               message: "Worktree \(worktree.name) has \(count) \(label)",
+                                               worktreePath: worktree.path))
+                } else if !snapshot.config.isPaused, !worktree.isDirty,
+                          worktree.ageDays > thresholds.staleWorktreeDays {
+                    items.append(AttentionItem(kind: .staleWorktree, severity: .info,
+                                               message: "Worktree \(worktree.name) idle \(worktree.ageDays) days",
+                                               worktreePath: worktree.path))
+                }
             }
         }
 
-        for pr in snapshot.pr.prs {
-            if pr.ciFailing {
-                items.append(AttentionItem(kind: .failingCI, severity: .critical,
-                                           message: "PR #\(pr.number) failing CI"))
-            }
-            if pr.ageDays > thresholds.stalePRDays {
-                items.append(AttentionItem(kind: .oldOpenPR, severity: .warning,
-                                           message: "PR #\(pr.number) open \(pr.ageDays) days"))
+        if snapshot.pr.freshness == .current {
+            for pr in snapshot.pr.prs {
+                if pr.ciFailing {
+                    items.append(AttentionItem(kind: .failingCI, severity: .critical,
+                                               message: "PR #\(pr.number) failing CI"))
+                }
+                if pr.ageDays > thresholds.stalePRDays {
+                    items.append(AttentionItem(kind: .oldOpenPR, severity: .info,
+                                               message: "PR #\(pr.number) open \(pr.ageDays) days"))
+                }
             }
         }
 
-        if snapshot.activity.available, let activity = snapshot.activity.activity {
+        if !snapshot.config.isPaused,
+           snapshot.activity.freshness == .current,
+           let activity = snapshot.activity.activity {
             let days = daysBetween(activity.date, and: now, calendar: calendar)
             if days > thresholds.inactivityDays {
                 items.append(AttentionItem(kind: .inactiveProject, severity: .info,
-                                           message: "No agent activity for \(days) days"))
+                                           message: "No Engram activity for \(days) days"))
             }
         }
 
         return sorted(items)
     }
 
-    /// Whether the badge should count this repository.
+    /// Whether the repository has an actionable warning or critical finding.
+    /// Informational age notices do not count as a project needing attention.
     public static func needsAttention(_ items: [AttentionItem]) -> Bool {
-        !items.isEmpty
+        items.contains { $0.severity > .info }
     }
 
     // MARK: - Helpers

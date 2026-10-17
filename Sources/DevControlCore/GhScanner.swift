@@ -45,7 +45,7 @@ public struct GhScanner {
                 return PRStatus(available: false, error: "gh produced non-UTF8 output")
             }
             let prs = try GhParser.parsePRList(data, now: now, calendar: calendar)
-            return PRStatus(prs: prs, available: true)
+            return PRStatus(prs: prs, available: true, lastReadAt: now)
         } catch {
             return PRStatus(available: false, error: ScannerError.describe(error))
         }

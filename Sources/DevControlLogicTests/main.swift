@@ -47,9 +47,10 @@ let sharedThresholds = AppConfig(refreshIntervalMinutes: 5, staleWorktreeDays: 7
                                  stalePRDays: 7, inactivityDays: 14)
 
 func snapshot(git: GitStatus = GitStatus(), pr: PRStatus = PRStatus(),
-              activity: ActivityStatus = ActivityStatus()) -> RepoSnapshot {
-    RepoSnapshot(config: RepoConfig(id: "demo", path: "/tmp/demo"), git: git,
-                 pr: pr, activity: activity)
+              activity: ActivityStatus = ActivityStatus(),
+              isPaused: Bool = false) -> RepoSnapshot {
+    RepoSnapshot(config: RepoConfig(id: "demo", path: "/tmp/demo", isPaused: isPaused),
+                 git: git, pr: pr, activity: activity)
 }
 
 func attentionMathTests() {
@@ -62,23 +63,24 @@ func attentionMathTests() {
         check(!AttentionMath.needsAttention(items), "clean repo does not need attention")
     }
 
-    // MARK: Dirty files
+    // MARK: Pending changes are informational
 
     do {
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(branch: "main", dirtyCount: 3)),
             now: sharedNow, calendar: cal, thresholds: sharedThresholds)
-        checkEqual(items.count, 1, "dirty repo yields one item")
-        checkEqual(items.first?.kind, .dirtyFiles, "dirty item kind")
-        checkEqual(items.first?.severity, .warning, "dirty item severity")
-        checkEqual(items.first?.message, "3 uncommitted files", "dirty item plural message")
+        check(items.isEmpty, "pending checkout changes do not create an attention finding")
+        check(!AttentionMath.needsAttention(items), "pending checkout changes are not urgent")
     }
 
     do {
+        let changes = ChangeCounts(staged: 1, unstaged: 2, untracked: 1)
         let items = AttentionMath.classify(
-            snapshot(git: GitStatus(branch: "main", dirtyCount: 1)),
+            snapshot(git: GitStatus(worktrees: [WorktreeInfo(path: "/r/w", name: "w",
+                isDirty: true, ageDays: 1, changes: changes)])),
             now: sharedNow, calendar: cal, thresholds: sharedThresholds)
-        checkEqual(items.first?.message, "1 uncommitted file", "dirty item singular message")
+        check(items.isEmpty, "pending worktree changes do not create an attention finding")
+        check(!AttentionMath.needsAttention(items), "pending worktree changes are not urgent")
     }
 
     // MARK: Unpushed commits
@@ -94,18 +96,6 @@ func attentionMathTests() {
     // MARK: Worktrees
 
     do {
-        let dirty = WorktreeInfo(path: "/r/.atl/fix-1", name: "fix-1", isDirty: true, ageDays: 1)
-        let items = AttentionMath.classify(
-            snapshot(git: GitStatus(worktrees: [dirty])),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
-        checkEqual(items.count, 1, "dirty worktree flagged even when young")
-        checkEqual(items.first?.kind, .staleWorktree, "dirty worktree kind")
-        checkEqual(items.first?.severity, .warning, "dirty worktree severity")
-        checkEqual(items.first?.message, "Worktree fix-1 has uncommitted changes", "dirty worktree message")
-        checkEqual(items.first?.worktreePath, "/r/.atl/fix-1", "worktree finding retains actionable path")
-    }
-
-    do {
         let old = WorktreeInfo(path: "/r/.atl/final-127", name: "final-127", isDirty: false, ageDays: 9)
         let young = WorktreeInfo(path: "/r/.atl/final-130", name: "final-130", isDirty: false, ageDays: 2)
         let items = AttentionMath.classify(
@@ -114,6 +104,28 @@ func attentionMathTests() {
         checkEqual(items.count, 1, "only stale clean worktree flagged")
         checkEqual(items.first?.message, "Worktree final-127 idle 9 days", "stale worktree message")
         checkEqual(items.first?.severity, .info, "stale clean worktree is info")
+        check(!AttentionMath.needsAttention(items), "idle worktree information is not urgent")
+    }
+
+    do {
+        let conflicted = WorktreeInfo(path: "/r/.atl/fix-1", name: "fix-1", isDirty: true,
+                                      ageDays: 1, changes: ChangeCounts(conflicts: 2))
+        let items = AttentionMath.classify(
+            snapshot(git: GitStatus(worktrees: [conflicted])),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+        checkEqual(items.count, 1, "conflicted worktree creates one finding")
+        checkEqual(items.first?.kind, .mergeConflict, "conflicted worktree kind")
+        checkEqual(items.first?.severity, .critical, "conflict requires attention")
+        checkEqual(items.first?.message, "Worktree fix-1 has 2 merge conflicts", "conflict count is explicit")
+        checkEqual(items.first?.worktreePath, "/r/.atl/fix-1", "conflict retains selected worktree path")
+    }
+
+    do {
+        let conflicted = GitStatus(branch: "main", changes: ChangeCounts(conflicts: 1))
+        let items = AttentionMath.classify(snapshot(git: conflicted), now: sharedNow,
+                                           calendar: cal, thresholds: sharedThresholds)
+        checkEqual(items.first?.kind, .mergeConflict, "primary checkout conflict is detected")
+        checkEqual(items.first?.severity, .critical, "primary checkout conflict requires attention")
     }
 
     do {
@@ -144,7 +156,19 @@ func attentionMathTests() {
             now: sharedNow, calendar: cal, thresholds: sharedThresholds)
         checkEqual(items.count, 1, "old PR flagged")
         checkEqual(items.first?.kind, .oldOpenPR, "old PR kind")
-        checkEqual(items.first?.severity, .warning, "old PR severity")
+        checkEqual(items.first?.severity, .info, "PR age alone is informational")
+        check(!AttentionMath.needsAttention(items), "age alone does not require attention")
+    }
+
+    do {
+        let staleFailure = PRStatus(
+            prs: [PRInfo(number: 14, title: "Fix", ageDays: 2, ciFailing: true)],
+            available: false, error: "gh unavailable", lastReadAt: date(2026, 10, 15), isStale: true)
+        let items = AttentionMath.classify(
+            snapshot(pr: staleFailure), now: sharedNow, calendar: cal,
+            thresholds: sharedThresholds)
+        check(items.isEmpty, "stale failing CI is not presented as a current finding")
+        check(!AttentionMath.needsAttention(items), "stale checks alone do not require current attention")
     }
 
     do {
@@ -154,6 +178,8 @@ func attentionMathTests() {
             now: sharedNow, calendar: cal, thresholds: sharedThresholds)
         checkEqual(items.count, 2, "failing and old PR yield both items")
         checkEqual(items.first?.kind, .failingCI, "critical item sorts first")
+        checkEqual(items.last?.severity, .info, "old PR remains informational alongside failure")
+        check(AttentionMath.needsAttention(items), "failing CI still requires attention")
     }
 
     // MARK: Engram inactivity
@@ -165,7 +191,24 @@ func attentionMathTests() {
             now: sharedNow, calendar: cal, thresholds: sharedThresholds)
         checkEqual(items.count, 1, "inactive project flagged")
         checkEqual(items.first?.kind, .inactiveProject, "inactivity kind")
-        checkEqual(items.first?.message, "No agent activity for 26 days", "inactivity message counts days")
+        checkEqual(items.first?.message, "No Engram activity for 26 days", "inactivity message names its source")
+        check(!AttentionMath.needsAttention(items), "inactivity information is not urgent")
+    }
+
+    do {
+        let stale = ActivityInfo(title: "old session", date: date(2026, 9, 20))
+        let items = AttentionMath.classify(
+            snapshot(activity: ActivityStatus(activity: stale, available: true), isPaused: true),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+        check(items.isEmpty, "paused project suppresses Engram inactivity notice")
+    }
+
+    do {
+        let oldWorktree = WorktreeInfo(path: "/r/.atl/old", name: "old", isDirty: false, ageDays: 20)
+        let items = AttentionMath.classify(
+            snapshot(git: GitStatus(worktrees: [oldWorktree]), isPaused: true),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+        check(items.isEmpty, "paused project suppresses idle-clean-worktree notice")
     }
 
     do {
@@ -190,16 +233,39 @@ func attentionMathTests() {
         check(items.isEmpty, "project with no Engram data at all is not flagged")
     }
 
-    // MARK: Config errors
+    // MARK: Git errors are unavailable data, not attention findings
 
     do {
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(error: "Repository path not found: /tmp/gone")),
             now: sharedNow, calendar: cal, thresholds: sharedThresholds)
-        checkEqual(items.count, 1, "config error yields exactly one item")
-        checkEqual(items.first?.kind, .configError, "config error kind")
-        checkEqual(items.first?.severity, .critical, "config error severity")
-        check(items.first?.message.contains("/tmp/gone") == true, "config error names the path")
+        check(items.isEmpty, "a Git source error is represented as no information, not a finding")
+        check(!AttentionMath.needsAttention(items), "a Git source error is not falsely urgent")
+    }
+
+    do {
+        let failing = PRInfo(number: 21, title: "Current CI failure", ageDays: 1, ciFailing: true)
+        let items = AttentionMath.classify(
+            snapshot(git: GitStatus(error: "git timed out"),
+                    pr: PRStatus(prs: [failing], available: true)),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+        checkEqual(items.count, 1, "a Git failure does not hide an independent current check")
+        checkEqual(items.first?.kind, .failingCI,
+                   "current GitHub evidence remains actionable when Git is unavailable")
+    }
+
+    do {
+        let staleGit = GitStatus(
+            branch: "main", error: "git timeout", changes: ChangeCounts(conflicts: 1),
+            lastReadAt: date(2026, 10, 15), isStale: true)
+        let staleActivity = ActivityStatus(
+            activity: ActivityInfo(title: "old", date: date(2026, 9, 1)),
+            available: false, error: "Engram unavailable",
+            lastReadAt: date(2026, 10, 15), isStale: true)
+        let items = AttentionMath.classify(
+            snapshot(git: staleGit, activity: staleActivity),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+        check(items.isEmpty, "stale Git conflicts and Engram activity do not create current findings")
     }
 
     // MARK: Severity ordering
@@ -211,10 +277,10 @@ func attentionMathTests() {
             pr: PRStatus(prs: [PRInfo(number: 5, title: "T", ageDays: 1, ciFailing: true)], available: true))
         let items = AttentionMath.classify(snap, now: sharedNow, calendar: cal,
                                            thresholds: sharedThresholds)
-        checkEqual(items.map { $0.severity }, [.critical, .warning, .warning, .info],
-                   "items sort critical, warnings, infos")
-        checkEqual(items[1].message, "1 unpushed commit on main", "warnings sort by message")
-        checkEqual(items[2].message, "2 uncommitted files", "warnings sort by message (2)")
+        checkEqual(items.map { $0.severity }, [.critical, .warning, .info],
+                   "items sort critical, warning, then information")
+        checkEqual(items[1].message, "1 unpushed commit on main", "evidence-based warning is retained")
+        checkEqual(items[2].message, "Worktree w idle 30 days", "age-only worktree notice stays informational")
         check(AttentionMath.needsAttention(items), "mixed items need attention")
     }
 
@@ -228,6 +294,7 @@ func attentionMathTests() {
     do {
         let repo = RepoConfig(id: "demo", path: "/Users/x/Projects/demo-repo")
         checkEqual(repo.folderName, "demo-repo", "folderName from path")
+        check(!repo.isPaused, "new repository defaults to active")
         checkEqual(repo.resolvedEngramProject, "demo-repo", "engram project defaults to folder name")
         let custom = RepoConfig(id: "demo", path: "/x/demo-repo", engramProject: "other")
         checkEqual(custom.resolvedEngramProject, "other", "engram project override respected")
@@ -256,12 +323,14 @@ func attentionMathTests() {
         check(missing == nil, "load returns nil when config file does not exist")
 
         var config = AppConfig(repos: [RepoConfig(id: "a", path: "/tmp/a"),
-                                       RepoConfig(id: "b", path: "/tmp/b", githubSlug: "o/b")],
+                                       RepoConfig(id: "b", path: "/tmp/b", githubSlug: "o/b",
+                                                  isPaused: true)],
                                refreshIntervalMinutes: 10)
         config.staleWorktreeDays = 3
         try store.save(config)
         let loaded = try store.load()
         checkEqual(loaded, config, "config roundtrip preserves repos and thresholds")
+        check(loaded?.repos.last?.isPaused == true, "config roundtrip preserves paused state")
         check(FileManager.default.fileExists(atPath: store.fileURL.path), "config file created")
         try? FileManager.default.removeItem(at: dir)
     } catch {
@@ -278,6 +347,7 @@ func attentionMathTests() {
                                                from: Data(minimalJSON.utf8))
         checkEqual(decoded.repos.count, 1, "minimal config decodes repos")
         checkEqual(decoded.repos[0].enabled, true, "omitted enabled defaults to true")
+        checkEqual(decoded.repos[0].isPaused, false, "omitted paused defaults to false")
         checkEqual(decoded.refreshIntervalMinutes, 5, "omitted refresh interval falls back to default")
         checkEqual(decoded.staleWorktreeDays, 7, "omitted threshold falls back to default")
     } catch {
@@ -290,6 +360,7 @@ attentionMathTests()
 gitScannerTests()
 ghScannerTests()
 engramScannerTests()
+processRunnerTests()
 // ghScannerTests()    // T4
 // engramScannerTests() // T5
 
