@@ -53,8 +53,9 @@ public enum ScannerError: Error, CustomStringConvertible {
     }
 }
 
-/// Scans one local repository with git: branch, dirty file count, unpushed
-/// commit count, and linked worktrees (branch, dirty count, and last-commit age).
+/// Scans one local repository with git: branch, normalized pending-change
+/// counts (staged, unstaged, untracked, conflicts), unpushed commit count, and
+/// linked worktrees (branch, per-worktree change counts, and last-commit age).
 public struct GitScanner {
     private let git: String
     private let runner: ProcessRunning
@@ -76,11 +77,11 @@ public struct GitScanner {
 
         do {
             let branch = try currentBranch(repoPath)
-            let dirtyCount = try dirtyFileCount(repoPath)
+            let changes = try statusChanges(repoPath)
             let unpushedCount = unpushedCommitCount(repoPath)
             let worktrees = try scanWorktrees(repoPath, now: now, calendar: calendar)
-            return GitStatus(branch: branch, dirtyCount: dirtyCount,
-                             unpushedCount: unpushedCount, worktrees: worktrees)
+            return GitStatus(branch: branch, unpushedCount: unpushedCount,
+                             worktrees: worktrees, changes: changes)
         } catch {
             return GitStatus(error: describe(error, for: repoPath))
         }
@@ -95,9 +96,11 @@ public struct GitScanner {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func dirtyFileCount(_ repoPath: String) throws -> Int {
+    /// Normalized staged/unstaged/untracked/conflict counts for one checkout
+    /// or linked worktree, read from `git status --porcelain=v1`.
+    private func statusChanges(_ repoPath: String) throws -> ChangeCounts {
         let output = try runner.run(git, ["-C", repoPath, "status", "--porcelain=v1"], in: nil)
-        return GitParser.countStatusEntries(output)
+        return GitParser.parseChangeCounts(output)
     }
 
     private func unpushedCommitCount(_ repoPath: String) -> Int {
@@ -120,7 +123,7 @@ public struct GitScanner {
         var result: [WorktreeInfo] = []
         for block in linkedBlocks {
             let worktreePath = block.path
-            let dirtyCount = (try? dirtyFileCount(worktreePath)) ?? 0
+            let changes = (try? statusChanges(worktreePath)) ?? .none
             let lastCommitAt = block.headCommit.flatMap { timestamps[$0] }
             let ageDays: Int
             if let lastCommitAt {
@@ -132,9 +135,9 @@ public struct GitScanner {
             }
             result.append(WorktreeInfo(path: worktreePath,
                                        name: (worktreePath as NSString).lastPathComponent,
-                                       isDirty: dirtyCount > 0, ageDays: ageDays,
-                                       branch: block.branch, dirtyCount: dirtyCount,
-                                       lastCommitAt: lastCommitAt))
+                                       isDirty: changes.isDirty, ageDays: ageDays,
+                                       branch: block.branch, lastCommitAt: lastCommitAt,
+                                       changes: changes))
         }
         return result
     }
@@ -161,7 +164,38 @@ public struct GitScanner {
 public enum GitParser {
     /// Counts entries in `git status --porcelain=v1` output.
     public static func countStatusEntries(_ output: String) -> Int {
-        output.split(separator: "\n", omittingEmptySubsequences: true).count
+        parseChangeCounts(output).pendingFiles
+    }
+
+    /// Normalizes `git status --porcelain=v1` output into staged, unstaged,
+    /// untracked, and conflict counts. Each file is counted once in
+    /// `pendingFiles`; unmerged pairs count only as conflicts, and ignored
+    /// (`!!`) entries are not pending changes.
+    public static func parseChangeCounts(_ output: String) -> ChangeCounts {
+        let unmergedPairs: Set<String> = ["DD", "AU", "UD", "UA", "DU", "AA", "UU"]
+        var counts = ChangeCounts()
+
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let status = String(line.prefix(2))
+            guard status.count == 2 else { continue }
+            let index = status[status.startIndex]
+            let worktree = status[status.index(after: status.startIndex)]
+
+            if index == "!", worktree == "!" {
+                continue // Ignored files are not pending changes.
+            }
+            counts.pendingFiles += 1
+
+            if index == "?", worktree == "?" {
+                counts.untracked += 1
+            } else if unmergedPairs.contains(status) {
+                counts.conflicts += 1
+            } else {
+                if index != " " { counts.staged += 1 }
+                if worktree != " " { counts.unstaged += 1 }
+            }
+        }
+        return counts
     }
 
     /// Parses `git worktree list --porcelain` into blocks. The first block is

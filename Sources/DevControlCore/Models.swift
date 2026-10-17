@@ -95,26 +95,72 @@ public struct AppConfig: Codable, Hashable, Sendable {
 
 // MARK: - Scan results
 
+/// Normalized working-tree change counts for one checkout or linked worktree,
+/// derived from `git status --porcelain=v1`. The category counts describe
+/// membership, so a file staged and then modified again appears in both
+/// `staged` and `unstaged`; `pendingFiles` counts each porcelain entry once.
+/// Unmerged (conflicted) entries are conflict evidence and are not also
+/// counted as staged or unstaged.
+public struct ChangeCounts: Hashable, Sendable {
+    /// Entries with index (staged) changes: column `X` of porcelain v1.
+    public var staged: Int
+    /// Entries with working-tree (unstaged) changes: column `Y` of porcelain v1.
+    public var unstaged: Int
+    /// Untracked files (`??`).
+    public var untracked: Int
+    /// Unmerged entries (`DD`, `AU`, `UD`, `UA`, `DU`, `AA`, `UU`).
+    public var conflicts: Int
+    /// Distinct pending entries, one per file in `git status --porcelain=v1`.
+    /// A file whose changes are both staged and unstaged counts once here while
+    /// appearing in both `staged` and `unstaged`.
+    public var pendingFiles: Int
+
+    public static let none = ChangeCounts()
+
+    public init(staged: Int = 0, unstaged: Int = 0, untracked: Int = 0, conflicts: Int = 0,
+                pendingFiles: Int? = nil) {
+        self.staged = staged
+        self.unstaged = unstaged
+        self.untracked = untracked
+        self.conflicts = conflicts
+        // Callers that do not supply a line count are assumed to describe
+        // disjoint categories; the parser always supplies the exact count.
+        self.pendingFiles = pendingFiles ?? (staged + unstaged + untracked + conflicts)
+    }
+
+    /// Whether the checkout or worktree has any pending change.
+    public var isDirty: Bool { pendingFiles > 0 }
+
+    /// Whether the checkout or worktree holds an unmerged conflict.
+    public var hasConflicts: Bool { conflicts > 0 }
+}
+
 /// A linked git worktree of a repository.
 public struct WorktreeInfo: Hashable, Sendable {
     public var path: String
     public var name: String
     public var branch: String?
-    public var isDirty: Bool
-    public var dirtyCount: Int
+    /// Normalized staged/unstaged/untracked/conflict counts for this worktree.
+    public var changes: ChangeCounts
     /// Whole days since the last commit, used for the idle threshold.
     public var ageDays: Int
     /// Nil when git could not read the worktree's last commit timestamp.
     public var lastCommitAt: Date?
 
+    /// Backward-compatible: true when the worktree has any pending change.
+    public var isDirty: Bool { changes.isDirty }
+    /// Backward-compatible: number of pending files, equal to `changes.pendingFiles`.
+    public var dirtyCount: Int { changes.pendingFiles }
+
     public init(path: String, name: String, isDirty: Bool, ageDays: Int,
                 branch: String? = nil, dirtyCount: Int? = nil,
-                lastCommitAt: Date? = nil) {
+                lastCommitAt: Date? = nil, changes: ChangeCounts? = nil) {
         self.path = path
         self.name = name
         self.branch = branch
-        self.isDirty = isDirty
-        self.dirtyCount = dirtyCount ?? (isDirty ? 1 : 0)
+        // Legacy callers supply only `isDirty`/`dirtyCount`; they have no
+        // category breakdown, so the total is attributed to unstaged changes.
+        self.changes = changes ?? ChangeCounts(unstaged: dirtyCount ?? (isDirty ? 1 : 0))
         self.ageDays = ageDays
         self.lastCommitAt = lastCommitAt
     }
@@ -149,16 +195,23 @@ public struct ActivityInfo: Hashable, Sendable {
 /// Result of scanning one repository with local git.
 public struct GitStatus: Hashable, Sendable {
     public var branch: String?
-    public var dirtyCount: Int
+    /// Normalized staged/unstaged/untracked/conflict counts for the primary checkout.
+    public var changes: ChangeCounts
     public var unpushedCount: Int
     public var worktrees: [WorktreeInfo]
     /// Non-nil when the repository could not be scanned (missing path, not a repo).
     public var error: String?
 
+    /// Backward-compatible: number of pending files in the primary checkout.
+    public var dirtyCount: Int { changes.pendingFiles }
+
     public init(branch: String? = nil, dirtyCount: Int = 0, unpushedCount: Int = 0,
-                worktrees: [WorktreeInfo] = [], error: String? = nil) {
+                worktrees: [WorktreeInfo] = [], error: String? = nil,
+                changes: ChangeCounts? = nil) {
         self.branch = branch
-        self.dirtyCount = dirtyCount
+        // Legacy callers supply only `dirtyCount`; without a category
+        // breakdown the total is attributed to unstaged changes.
+        self.changes = changes ?? ChangeCounts(unstaged: dirtyCount)
         self.unpushedCount = unpushedCount
         self.worktrees = worktrees
         self.error = error

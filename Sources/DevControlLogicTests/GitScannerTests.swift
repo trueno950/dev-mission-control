@@ -41,6 +41,70 @@ func gitScannerTests() {
     checkEqual(GitParser.countStatusEntries("M  a.swift\n?? new.txt\nR  b.swift\n"), 3,
                "multiple entries each count once")
 
+    // MARK: - GitParser.parseChangeCounts (staged / unstaged / untracked / conflicts)
+
+    do {
+        let counts = GitParser.parseChangeCounts("M  a.swift\nA  b.swift\nR  c.swift -> d.swift\n")
+        checkEqual(counts.staged, 3, "index-only entries count as staged")
+        checkEqual(counts.unstaged, 0, "index-only entries add no unstaged count")
+        checkEqual(counts.untracked, 0, "index-only entries add no untracked count")
+        checkEqual(counts.conflicts, 0, "index-only entries add no conflict count")
+        checkEqual(counts.pendingFiles, 3, "staged entries each count once as a pending file")
+    }
+
+    do {
+        let counts = GitParser.parseChangeCounts(" M a.swift\n D b.swift\n")
+        checkEqual(counts.unstaged, 2, "worktree-only entries count as unstaged")
+        checkEqual(counts.staged, 0, "worktree-only entries add no staged count")
+        checkEqual(counts.untracked, 0, "worktree-only entries add no untracked count")
+        checkEqual(counts.conflicts, 0, "worktree-only entries add no conflict count")
+        checkEqual(counts.pendingFiles, 2, "unstaged entries each count once as a pending file")
+    }
+
+    do {
+        let counts = GitParser.parseChangeCounts("?? new.txt\n?? dir/nested.txt\n")
+        checkEqual(counts.untracked, 2, "untracked entries count separately")
+        checkEqual(counts.staged, 0, "untracked entries add no staged count")
+        checkEqual(counts.unstaged, 0, "untracked entries add no unstaged count")
+        checkEqual(counts.conflicts, 0, "untracked entries add no conflict count")
+        checkEqual(counts.pendingFiles, 2, "untracked entries each count once as a pending file")
+    }
+
+    do {
+        let counts = GitParser.parseChangeCounts("UU both.swift\nAA added.swift\nDU deleted.swift\n")
+        checkEqual(counts.conflicts, 3, "unmerged entries count as conflicts")
+        checkEqual(counts.staged, 0, "conflicts are not also counted as staged")
+        checkEqual(counts.unstaged, 0, "conflicts are not also counted as unstaged")
+        checkEqual(counts.pendingFiles, 3, "conflicts each count once as a pending file")
+        check(counts.hasConflicts, "conflict counts report conflict evidence")
+    }
+
+    do {
+        let output = """
+        M  staged.swift
+        RM renamed.swift -> next.swift
+         M unstaged.swift
+        MM both.swift
+        ?? untracked.txt
+        UU conflict.swift
+
+        """
+        let counts = GitParser.parseChangeCounts(output)
+        checkEqual(counts.staged, 3, "mixed output counts index changes once")
+        checkEqual(counts.unstaged, 3, "mixed output counts worktree changes once")
+        checkEqual(counts.untracked, 1, "mixed output counts untracked files once")
+        checkEqual(counts.conflicts, 1, "mixed output counts conflicted files once")
+        checkEqual(counts.pendingFiles, 6,
+                   "a file staged and then modified again counts as one pending file")
+        checkEqual(GitParser.countStatusEntries(output), 6,
+                   "legacy entry count matches the normalized pending file count")
+    }
+
+    do {
+        let counts = GitParser.parseChangeCounts("")
+        checkEqual(counts, ChangeCounts.none, "empty porcelain output normalizes to no changes")
+    }
+
     // MARK: - GitParser.parseWorktreeBlocks
 
     do {
@@ -108,6 +172,26 @@ func gitScannerTests() {
         checkEqual(status.dirtyCount, 2, "dirty count from status porcelain")
         checkEqual(status.unpushedCount, 3, "unpushed count from rev-list")
         check(status.worktrees.isEmpty, "main-only worktree list yields no linked worktrees")
+    }
+
+    do {
+        // T7: the primary checkout is normalized into the four change categories.
+        let runner = FakeRunner(outputs: [
+            (("/usr/bin/git", ["-C", "/repos/demo", "status"]),
+             .success("M  a.swift\n M b.swift\n?? c.txt\nUU d.swift\n")),
+            (("/usr/bin/git", ["-C", "/repos/demo", "symbolic-ref"]), .success("main\n")),
+            (("/usr/bin/git", ["-C", "/repos/demo", "rev-list"]), .success("0\n")),
+            (("/usr/bin/git", ["-C", "/repos/demo", "worktree"]),
+             .success("worktree /repos/demo\nHEAD abc\nbranch refs/heads/main\n")),
+        ])
+        let scanner = GitScanner(runner: runner, pathExists: { _ in true })
+        let status = scanner.scan(repoPath: "/repos/demo", now: now, calendar: cal)
+        checkEqual(status.error, nil, "checkout normalization fixture scan succeeds")
+        checkEqual(status.changes.staged, 1, "checkout staged count")
+        checkEqual(status.changes.unstaged, 1, "checkout unstaged count")
+        checkEqual(status.changes.untracked, 1, "checkout untracked count")
+        checkEqual(status.changes.conflicts, 1, "checkout conflict count")
+        checkEqual(status.dirtyCount, 4, "legacy dirtyCount equals the normalized total")
     }
 
     do {
@@ -187,6 +271,44 @@ func gitScannerTests() {
             checkEqual(status.worktrees[1].dirtyCount, 3, "dirty worktree reports changed file count")
             checkEqual(status.worktrees[1].branch, "feature/fix-131", "worktree branch parsed")
             checkEqual(status.worktrees[1].ageDays, 1, "recent worktree age")
+        }
+    }
+
+    do {
+        // T7: linked worktrees are normalized per worktree, not only per repo.
+        let linked = """
+        worktree /repos/demo
+        HEAD abc
+        branch refs/heads/main
+
+        worktree /repos/demo/.atl/w1
+        HEAD def
+        detached
+
+        """
+        let epoch = String(Int(now.addingTimeInterval(-2 * 86_400).timeIntervalSince1970))
+        let runner = FakeRunner(outputs: [
+            (("/usr/bin/git", ["-C", "/repos/demo", "status"]), .success("")),
+            (("/usr/bin/git", ["-C", "/repos/demo", "symbolic-ref"]), .success("main\n")),
+            (("/usr/bin/git", ["-C", "/repos/demo", "rev-list"]), .success("0\n")),
+            (("/usr/bin/git", ["-C", "/repos/demo", "worktree"]), .success(linked)),
+            (("/usr/bin/git", ["-C", "/repos/demo", "log"]), .success("def\t\(epoch)\n")),
+            (("/usr/bin/git", ["-C", "/repos/demo/.atl/w1", "status"]),
+             .success("M  s.swift\n M u.swift\n?? n.swift\nDD c.swift\n")),
+        ])
+        let scanner = GitScanner(runner: runner, pathExists: { _ in true })
+        let status = scanner.scan(repoPath: "/repos/demo", now: now, calendar: cal)
+        checkEqual(status.error, nil, "per-worktree normalization fixture scan succeeds")
+        checkEqual(status.worktrees.count, 1, "normalization fixture yields one linked worktree")
+        if let worktree = status.worktrees.first {
+            checkEqual(worktree.changes.staged, 1, "worktree staged count")
+            checkEqual(worktree.changes.unstaged, 1, "worktree unstaged count")
+            checkEqual(worktree.changes.untracked, 1, "worktree untracked count")
+            checkEqual(worktree.changes.conflicts, 1, "worktree conflict count")
+            checkEqual(worktree.dirtyCount, 4, "worktree dirtyCount equals the normalized total")
+            check(worktree.isDirty, "worktree with pending changes stays dirty")
+        } else {
+            check(false, "per-worktree normalization fixture: missing worktree")
         }
     }
 
