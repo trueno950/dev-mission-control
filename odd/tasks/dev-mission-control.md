@@ -8,11 +8,11 @@ S1: "un segundo widget con la misma base: un 'Mission Control' de desarrollo en 
 
 S2: Data sources per project, read-only and official only: local `git` (current branch, dirty file count, unpushed commit count, worktree list), `gh` CLI (open PRs with CI check status), Engram HTTP API (`GET /observations?project=<name>&limit=1` for last activity; server `http://127.0.0.1:7437`). No scraping, no mutations of user repos.
 
-S3: Attention classification (pure logic, threshold-driven): uncommitted local changes are informational and do not create an attention finding; verified conflicts and failing checks require attention; unpushed commits remain an evidence-based finding; PR age and clean-worktree age are informational and do not establish urgency. Agent inactivity is sourced only from Engram, never inferred from Git or file timestamps. Explicitly paused projects receive neither Engram inactivity nor idle-clean-worktree notices. This supersedes the previous dirty-worktree warning and age-only PR warning rules. Existing thresholds remain configurable for any informational age display.
+S3: Attention classification (pure logic, threshold-driven): uncommitted local changes are informational and do not create an attention finding; verified conflicts and failing checks require attention; unpushed commits remain an evidence-based finding; PR age and clean-worktree age are informational and do not establish urgency. Only current source reads may establish findings; stale or unavailable data is surfaced as no information, not as a clean result or attention alert. Agent inactivity is sourced only from Engram, never inferred from Git or file timestamps. Explicitly paused projects receive neither Engram inactivity nor idle-clean-worktree notices. This supersedes the previous dirty-worktree warning and age-only PR warning rules. Existing thresholds remain configurable for any informational age display.
 
 S4: Configuration persisted as JSON in Application Support (`~/Library/Application Support/DevMissionControl/config.json`): repo list (absolute path; GitHub slug and Engram project name optional, derived when absent), refresh interval (default 5 min), thresholds, and optional per-repository `isPaused` defaulting to false. The settings window can pause or resume a project; paused projects receive no inactivity findings. Existing configuration remains backward-compatible.
 
-S5: Graceful degradation: without `gh` (missing or unauthenticated) do not fabricate an empty PR result; without the Engram server do not fabricate activity; missing/invalid repo path renders an explicit config-error row instead of crashing. Each source reports its identity, last read time, availability, and freshness. If a refresh fails after a successful read, retain the last valid result marked stale and separately show the current source failure. Git remains queryable if GitHub or Engram fails.
+S5: Graceful degradation: without `gh` (missing or unauthenticated) do not fabricate an empty PR result; without the Engram server do not fabricate activity; a missing/invalid repo path is an unavailable Git source instead of a crash, not a clean result or an attention alert. Each source reports its identity, last read time, availability, and freshness. If a refresh fails after a successful read, retain the last valid result marked stale and separately show the current source failure. Findings use only current reads, while independent current sources remain classifiable. Git remains queryable if GitHub or Engram fails.
 
 S6: Manual refresh (button) plus automatic refresh every configured interval; scanning runs off the main thread; the panel never blocks. A refresh cannot overlap another refresh. External calls have bounded timeouts, and periodic scanning does not invoke a model.
 
@@ -28,7 +28,7 @@ S11: The requested actions open the selected worktree in an editor, terminal, or
 
 S12: The requested robustness rules separate connectors, normalized data, attention rules, and UI; prevent overlapping scans and UI blocking; bound external operations; preserve last valid data as stale after a refresh error; keep local Git available when another integration fails; avoid model calls in periodic scans; and pass process arguments separately without putting paths into shell command strings. A GitHub error is not an empty PR list.
 
-S13: Acceptance cases quoted from the user: “Un worktree con cambios recientes no aparece como urgente”; “Un conflicto sí requiere atención”; “Un fallo de GitHub no equivale a ‘sin PR’”; “Cada acción abre el worktree correcto, incluso con espacios en la ruta”; “Los contadores coinciden con los avisos visibles”; “Los datos antiguos están identificados.” The first case follows the user's amended no-cutoff wording in S9.
+S13: Acceptance cases quoted from the user: “Un worktree con cambios recientes no aparece como urgente”; “Un conflicto sí requiere atención”; “Un fallo de GitHub no equivale a ‘sin PR’”; “Sin información: integración ausente, error o datos desactualizados.”; “Cada acción abre el worktree correcto, incluso con espacios en la ruta”; “Los contadores coinciden con los avisos visibles”; “Los datos antiguos están identificados.” The first case follows the user's amended no-cutoff wording in S9.
 
 S14: The next delivery is explicitly “Retomar proyecto”: “recuperar desde Engram el último objetivo, avances, pendientes y archivos relevantes, mostrando fuente y fecha; contrastarlo con Git actual y permitir copiar contexto para IA. Utiliza interfaces soportadas y no escribas directamente en la base de Engram.” This is recorded as the next feature, not part of this first delivery.
 
@@ -43,8 +43,8 @@ T4 [S2,S5] GitHub scanner: origin-URL slug parsing + `gh pr list --json` parsing
 T5 [S2,S5,S6] Engram scanner (HTTP GET, per-project last activity) with response-parsing tests; aggregate scan pipeline and background refresh loop in AppState.
 T6 [S1,S7,S4] Full panel UI (per-project cards, attention rows, clean state, config-error rows), settings window with folder picker, README, final functional verification (build, launch, manual smoke on real repos).
 T7 [S9,S13] Normalize Git status per checkout/worktree (staged, unstaged, untracked, conflicts) with parser tests — worker, done; commit: 8024cbe.
-T8 [S9,S13] Implement evidence-based attention classification and backward-compatible paused-project config; test pause suppression and non-urgent pending changes; document evidence rules — inline, in progress; commit: pending.
-T9 [S5,S6,S12,S13] Add source timestamps/freshness, bounded non-overlapping scans, and last-good stale retention without losing Git when remote sources fail — inline; commit: pending.
+T8 [S9,S13] Implement evidence-based attention classification and backward-compatible paused-project config; test pause suppression and non-urgent pending changes; document evidence rules — inline, done; commit: 90285b7.
+T9 [S3,S5,S6,S12,S13] Add source timestamps/freshness, bounded non-overlapping scans, and last-good stale retention without losing Git when remote sources fail; classify stale/unavailable reads as no information; document the source states — worker plus parent review, in progress; split into source freshness, attention classification, and subprocess-timeout commit slices; source slice: `d0ae1ea`; classification and timeout slices pending.
 T10 [S11,S12,S13] Implement argument-safe worktree actions and verified worktree-to-PR mapping; test paths containing spaces and keep all operations read-only — inline; commit: pending.
 T11 [S10,S12,S13] Implement compact expandable repository cards, accurate project/notice counts, per-source freshness, pause controls, README updates, and end-to-end acceptance checks — inline; commit: pending.
 
@@ -155,3 +155,11 @@ Voy a dejarte el encargo en un bloque de texto listo para copiar, usando la func
 L7 (decision): “También cambiaría en el prompt ‘cambios locales recientes’ por ‘cambios locales pendientes’ para eliminar la ambigüedad. sin umbral”.
 
 L8 (implementation interpretation): A paused project suppresses both Engram inactivity and informational idle-clean-worktree notices; the latter is based only on last commit age and never implies agent activity.
+
+L9 (slice boundary): T7 is committed as `8024cbe` and T8 as `90285b7`; T9 starts a separate review slice on the feature branch.
+
+L10 (route): T9 uses the worker route for its bounded connector/AppState reliability changes; the parent owns verification, documentation/memory projection, and commit.
+
+L11 (spec clarification from the original request): “Sin información: integración ausente, error o datos desactualizados.” Only current source data may create findings; stale and unavailable values remain distinguishable from clean results, while other current sources continue independently.
+
+L12 (T9 slice boundary): Source freshness and last-good retention committed as `d0ae1ea` (`feat(data): retain source freshness across scan failures`), 371 diff lines. Remaining T9 commits are limited to attention classification and process deadlines.

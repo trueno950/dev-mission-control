@@ -9,7 +9,7 @@ For each tracked project, Dev Mission Control separates pending local work from 
 | State or finding | Evidence | Meaning |
 | --- | --- | --- |
 | In progress | Git reports staged, unstaged, or untracked files in the checkout or a linked worktree | Informational only; it is not evidence that an agent is running and is never urgent by itself |
-| Config error | The configured path is missing or is not a Git repository | critical |
+| Source unavailable or stale | The latest source read failed, or only an earlier successful value is retained | No information, not an alert; only current independent evidence can create a finding |
 | Merge conflict | Git reports one or more unmerged entries in the checkout or a linked worktree | critical |
 | Failing CI | An open PR has a failing check | critical |
 | Unpushed commits | Local commits are ahead of the configured upstream branch | warning |
@@ -28,6 +28,20 @@ All access is read-only. The app never mutates a repository and stores no creden
 The primary checkout branch is distinct from linked-worktree branches. Pending changes are a repository-state signal, not a claim about agent liveness. Actions remain read-only: the app never commits, pushes, merges, or removes worktrees.
 - **`gh` CLI**: `gh pr list -R <owner/repo> --state open --json number,title,createdAt,statusCheckRollup` for open PR age and CI state. The slug is taken from the config when set, otherwise derived from the `origin` remote.
 - **Engram HTTP API**: `GET http://127.0.0.1:7437/observations?project=<name>&limit=1` for the most recent agent activity of the project.
+
+## Source states and freshness
+
+Each source — local Git, the `gh` CLI, and the Engram HTTP API — is read independently. The app tracks whether each latest read succeeded, the time of its last successful read, and one of three freshness states:
+
+| State | Meaning |
+| --- | --- |
+| Current | The latest read succeeded; the value is current |
+| Stale | The latest read failed after an earlier success; the last valid value is retained in memory and the current failure is shown separately as unavailable |
+| Unavailable | The latest read failed and no earlier value exists |
+
+A failed refresh never erases the last good value: the retained value is marked stale and the current error is reported alongside it, so a `gh` failure is never an empty PR list and an Engram outage is never "no activity". Only current reads create findings; an unavailable or stale source is "no information", not an attention alert. Each source degrades independently, so local Git stays queryable when `gh` or Engram is down.
+
+Scans are non-overlapping: a manual or scheduled refresh is skipped while one is already running, so the panel never blocks. Every external operation is bounded — `git` and `gh` subprocesses time out after 30 s by default, and Engram requests use a 3 s request / 5 s resource timeout. Periodic scanning never calls a model. Subprocesses are launched by executable path with a separate argument vector; repository paths are passed as discrete `-C` arguments and are never concatenated into a shell command string.
 
 ## Requirements
 
@@ -121,7 +135,7 @@ Decoding is tolerant: omitted keys fall back to defaults, so configs written by 
 
 - **No stale local-branch detection.** Squash merges make `git branch --no-merged` unreliable, so branches that look unmerged may already be merged upstream. This was deliberately left out of v1.
 - **Worktree age is derived from its last commit date**, not from when the worktree was created or linked.
-- **Unavailable sources never fabricate findings.** If `gh` is missing or unauthenticated, PR/CI items are skipped for that repo and the card shows `PRs unavailable`. If Engram is unreachable, activity items are skipped and the card shows `Engram unavailable`. A missing or invalid repo path produces an explicit critical config-error row instead of crashing.
+- **Unavailable sources never fabricate findings, and stale data is identified.** If `gh` is missing or unauthenticated, PR/CI findings are skipped for that repo and the source is unavailable; when a previous successful read exists, its PR list is retained and marked stale rather than emptied. If Engram is unreachable, activity findings are skipped and the source is unavailable; the last known activity is retained as stale. A missing or invalid repo path is an unavailable Git source, not a clean result or an attention alert; independent current sources remain classifiable.
 - **Read-only by contract.** The app runs `git` queries, `gh pr list`, and an Engram `GET` only; it stores no credentials (git and the `gh` keyring stay external).
 
 ## Project layout

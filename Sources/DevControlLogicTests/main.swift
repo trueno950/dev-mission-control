@@ -161,6 +161,17 @@ func attentionMathTests() {
     }
 
     do {
+        let staleFailure = PRStatus(
+            prs: [PRInfo(number: 14, title: "Fix", ageDays: 2, ciFailing: true)],
+            available: false, error: "gh unavailable", lastReadAt: date(2026, 10, 15), isStale: true)
+        let items = AttentionMath.classify(
+            snapshot(pr: staleFailure), now: sharedNow, calendar: cal,
+            thresholds: sharedThresholds)
+        check(items.isEmpty, "stale failing CI is not presented as a current finding")
+        check(!AttentionMath.needsAttention(items), "stale checks alone do not require current attention")
+    }
+
+    do {
         let both = PRInfo(number: 8, title: "Feature", ageDays: 10, ciFailing: true)
         let items = AttentionMath.classify(
             snapshot(pr: PRStatus(prs: [both], available: true)),
@@ -222,16 +233,39 @@ func attentionMathTests() {
         check(items.isEmpty, "project with no Engram data at all is not flagged")
     }
 
-    // MARK: Config errors
+    // MARK: Git errors are unavailable data, not attention findings
 
     do {
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(error: "Repository path not found: /tmp/gone")),
             now: sharedNow, calendar: cal, thresholds: sharedThresholds)
-        checkEqual(items.count, 1, "config error yields exactly one item")
-        checkEqual(items.first?.kind, .configError, "config error kind")
-        checkEqual(items.first?.severity, .critical, "config error severity")
-        check(items.first?.message.contains("/tmp/gone") == true, "config error names the path")
+        check(items.isEmpty, "a Git source error is represented as no information, not a finding")
+        check(!AttentionMath.needsAttention(items), "a Git source error is not falsely urgent")
+    }
+
+    do {
+        let failing = PRInfo(number: 21, title: "Current CI failure", ageDays: 1, ciFailing: true)
+        let items = AttentionMath.classify(
+            snapshot(git: GitStatus(error: "git timed out"),
+                    pr: PRStatus(prs: [failing], available: true)),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+        checkEqual(items.count, 1, "a Git failure does not hide an independent current check")
+        checkEqual(items.first?.kind, .failingCI,
+                   "current GitHub evidence remains actionable when Git is unavailable")
+    }
+
+    do {
+        let staleGit = GitStatus(
+            branch: "main", error: "git timeout", changes: ChangeCounts(conflicts: 1),
+            lastReadAt: date(2026, 10, 15), isStale: true)
+        let staleActivity = ActivityStatus(
+            activity: ActivityInfo(title: "old", date: date(2026, 9, 1)),
+            available: false, error: "Engram unavailable",
+            lastReadAt: date(2026, 10, 15), isStale: true)
+        let items = AttentionMath.classify(
+            snapshot(git: staleGit, activity: staleActivity),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+        check(items.isEmpty, "stale Git conflicts and Engram activity do not create current findings")
     }
 
     // MARK: Severity ordering
