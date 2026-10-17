@@ -484,13 +484,29 @@ func diffParserTests() {
     check(DiffParser.parse("").isEmpty, "empty diff parses to no lines")
     checkEqual(DiffParser.parse("+solo")[0].kind, DiffLineKind.addition, "bare addition without headers")
 
-    // MARK: Stable per-line identities for lazy rendering (escalated R3-001)
+    // MARK: Stable content identities and hunk-state classification (correction)
 
     do {
         let lines = DiffParser.parse(sample)
-        checkEqual(lines.map { $0.id }, Array(lines.indices), "ids are sequential from zero")
+        checkEqual(Set(lines.map { $0.id }).count, lines.count, "every line gets a distinct identity")
         checkEqual(DiffParser.parse(sample).map { $0.id }, lines.map { $0.id },
                    "re-parsing the same diff yields the same identities")
+    }
+
+    do {
+        let lines = DiffParser.parse(" context\n context\n context")
+        checkEqual(Set(lines.map { $0.id }).count, 3, "identical lines keep distinct identities")
+    }
+
+    do {
+        // Inside a hunk, content starting with ++ or -- must stay an addition
+        // or removal; only the pre-hunk file headers are metadata.
+        let diff = "@@ -1,1 +1,2 @@\n+++content starting with pluses\n---content starting with minuses"
+        let lines = DiffParser.parse(diff)
+        checkEqual(lines[1].kind, DiffLineKind.addition,
+                   "hunk line whose content starts with + stays an addition")
+        checkEqual(lines[2].kind, DiffLineKind.removal,
+                   "hunk line whose content starts with - stays a removal")
     }
 }
 

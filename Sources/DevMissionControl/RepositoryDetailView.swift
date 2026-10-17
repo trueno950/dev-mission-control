@@ -232,13 +232,20 @@ struct RepositoryDetailView: View {
     }
 
     /// S20: open PRs with a direct browser link using only the HTTPS URL
-    /// returned by `gh`.
+    /// returned by `gh`. Retained stale data stays visible with a marker.
     @ViewBuilder
     private func pullRequestsSection(_ snapshot: RepoSnapshot) -> some View {
-        if snapshot.pr.freshness == .current, !snapshot.pr.prs.isEmpty {
+        if showsPullRequests(snapshot) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.t("Pull requests", "Pull requests"))
-                    .font(.caption.weight(.semibold))
+                HStack(spacing: 6) {
+                    Text(L10n.t("Pull requests", "Pull requests"))
+                        .font(.caption.weight(.semibold))
+                    if snapshot.pr.freshness == .stale {
+                        Text(L10n.t("· datos antiguos", "· stale data"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 ForEach(snapshot.pr.prs, id: \.number) { pr in
                     HStack(alignment: .top, spacing: 6) {
                         Circle()
@@ -272,6 +279,12 @@ struct RepositoryDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+    }
+
+    /// Retained stale PR data stays visible (a failed refresh never erases the
+    /// last good value); only an unavailable source with no data shows nothing.
+    private func showsPullRequests(_ snapshot: RepoSnapshot) -> Bool {
+        snapshot.pr.freshness != .unavailable && !snapshot.pr.prs.isEmpty
     }
 
     private func checkoutSection(_ snapshot: RepoSnapshot) -> some View {
