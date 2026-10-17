@@ -517,6 +517,7 @@ diffParserTests()
 gitScannerTests()
 ghScannerTests()
 engramScannerTests()
+engramPanelTests()
 processRunnerTests()
 worktreeActionTests()
 // ghScannerTests()    // T4
