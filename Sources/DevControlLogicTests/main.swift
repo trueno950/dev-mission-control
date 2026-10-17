@@ -360,6 +360,7 @@ attentionMathTests()
 gitScannerTests()
 ghScannerTests()
 engramScannerTests()
+processRunnerTests()
 // ghScannerTests()    // T4
 // engramScannerTests() // T5
 
