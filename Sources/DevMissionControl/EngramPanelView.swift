@@ -97,15 +97,33 @@ final class EngramPanelState: ObservableObject {
     @Published private(set) var statsRead: EngramRead<EngramProjectStats>?
     @Published private(set) var memoriesRead: EngramRead<[EngramMemory]>?
     @Published private(set) var isLoading = false
+    /// In-app search over `GET /search` (S2). The query is user input and the
+    /// read is kept apart from `memoriesRead`, so a search never overwrites the
+    /// latest-memories source and each one keeps its own freshness (S5).
+    @Published var searchQuery = ""
+    @Published private(set) var searchRead: EngramRead<[EngramMemory]>?
+    /// True only while a search request is in flight.
+    @Published private(set) var isSearching = false
     /// Selected memory's id; selecting expands its full content. Kept on the
     /// state so later search and sessions views can reuse the same selection.
     @Published var selectedMemoryID: Int?
     @Published var tuiError: String?
 
+    /// Both memory lists read the same number of rows.
+    private static let memoriesLimit = 20
+    /// Idle wait before a search is issued while the user types.
+    private static let searchDebounce: Duration = .milliseconds(350)
+
     let repoPath: String
     let repoName: String
     let configuredEngramProject: String?
     private let client: EngramPanelClient
+    /// Query the most recent search request was issued for. A reply whose query
+    /// is no longer current is discarded, so out-of-order responses cannot
+    /// overwrite a newer search.
+    private var issuedSearchQuery: String?
+    /// Pending idle-debounce task; cancelled by the next keystroke or submit.
+    private var searchDebounceTask: Task<Void, Never>?
 
     init(repoPath: String, repoName: String, configuredEngramProject: String?,
          client: EngramPanelClient = EngramPanelClient()) {
@@ -142,10 +160,93 @@ final class EngramPanelState: ObservableObject {
         projectsRead = projects.retainingLastRead(projectsRead)
 
         async let stats = client.stats(project: resolution.project)
-        async let memories = client.memories(project: resolution.project, limit: 20)
+        async let memories = client.memories(project: resolution.project,
+                                            limit: Self.memoriesLimit)
         let (newStats, newMemories) = await (stats, memories)
         statsRead = newStats.retainingLastRead(statsRead)
         memoriesRead = newMemories.retainingLastRead(memoriesRead)
+    }
+
+    // MARK: - Search (S2)
+
+    /// Search input without surrounding whitespace. A blank query counts as
+    /// empty so the panel keeps showing the latest-memories list.
+    var normalizedSearchQuery: String {
+        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// True while a query is active. Only then are the search source and its
+    /// results shown; an empty query leaves the panel exactly as it was.
+    var isSearchActive: Bool { !normalizedSearchQuery.isEmpty }
+
+    /// Project the search runs against (S4): the one `load()` resolved when it
+    /// already ran, otherwise the same resolver applied to the last
+    /// `/projects` read, so no project name is invented here.
+    private var searchProject: String {
+        if let projectName { return projectName }
+        return EngramProjectResolver.resolve(
+            repoPath: repoPath,
+            entries: projectsRead?.value ?? [],
+            configuredName: configuredEngramProject).project
+    }
+
+    /// One search for the current query (S2). A blank query clears the search
+    /// source instead of issuing a request. The reply is applied only when the
+    /// query it was issued for is still the current one, so a slow response can
+    /// never overwrite a newer search.
+    func runSearch() async {
+        let query = normalizedSearchQuery
+        guard !query.isEmpty else {
+            clearSearch()
+            return
+        }
+        issuedSearchQuery = query
+        isSearching = true
+        let read = await client.search(query: query, project: searchProject,
+                                       limit: Self.memoriesLimit)
+        // Out-of-order guard: the query changed or was cleared while this
+        // request was in flight, so its reply is discarded (and its spinner is
+        // left to the request that is still current).
+        guard issuedSearchQuery == query, normalizedSearchQuery == query else { return }
+        isSearching = false
+        searchRead = read.retainingLastRead(searchRead)
+    }
+
+    /// Idle debounce after a keystroke: only the last edit of a burst issues a
+    /// request, so typing never produces one request per keystroke.
+    func searchQueryDidChange() {
+        searchDebounceTask?.cancel()
+        searchDebounceTask = nil
+        guard isSearchActive else {
+            clearSearch()
+            return
+        }
+        searchDebounceTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.searchDebounce)
+            guard !Task.isCancelled else { return }
+            await self?.runSearch()
+        }
+    }
+
+    /// Enter: search now, cancelling any pending debounce.
+    func submitSearch() {
+        searchDebounceTask?.cancel()
+        searchDebounceTask = nil
+        guard isSearchActive else {
+            clearSearch()
+            return
+        }
+        Task { await runSearch() }
+    }
+
+    /// Drops the search source and makes any pending or in-flight request
+    /// non-current, so its reply is discarded instead of reviving old results.
+    func clearSearch() {
+        searchDebounceTask?.cancel()
+        searchDebounceTask = nil
+        issuedSearchQuery = nil
+        isSearching = false
+        searchRead = nil
     }
 }
 
@@ -163,6 +264,7 @@ struct EngramPanelView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     freshnessSection
                     countersSection
+                    searchField
                     memoriesSection
                 }
                 .padding(14)
@@ -242,7 +344,54 @@ struct EngramPanelView: View {
             freshnessLine(L10n.t("Proyecto", "Project"), read: state.projectsRead)
             freshnessLine(L10n.t("Contadores", "Counters"), read: state.statsRead)
             freshnessLine(L10n.t("Memorias", "Memories"), read: state.memoriesRead)
+            // The search is a source of its own, so it gets its own line with
+            // its read time and current failure. It only exists once a query
+            // was searched, so an empty query keeps this list as it was.
+            if state.isSearchActive, state.searchRead != nil {
+                freshnessLine(L10n.t("Búsqueda", "Search"), read: state.searchRead)
+            }
         }
+    }
+
+    // MARK: - Search field
+
+    /// In-app search over `/search` (S2). Typing only schedules the idle
+    /// debounce; Enter searches immediately and the clear button returns the
+    /// panel to the latest-memories list.
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(L10n.t("Buscar en las memorias…", "Search memories…"),
+                      text: $state.searchQuery)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .onSubmit { state.submitSearch() }
+            if state.isSearching {
+                ProgressView()
+                    .controlSize(.mini)
+            } else if !state.searchQuery.isEmpty {
+                Button {
+                    state.searchQuery = ""
+                    state.clearSearch()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.mini)
+                .help(L10n.t("Borrar la búsqueda", "Clear the search"))
+                .accessibilityLabel(L10n.t("Borrar la búsqueda", "Clear the search"))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.quaternary.opacity(0.3),
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .help(L10n.t("Busca en las memorias de Engram de este proyecto. Con Enter busca al momento; al dejar de escribir también busca.",
+                     "Searches this project's Engram memories. Enter searches right away; pausing the typing searches too."))
+        .onChange(of: state.searchQuery) { _ in state.searchQueryDidChange() }
     }
 
     /// One freshness line per source with its read time (S5). A stale value
@@ -311,15 +460,23 @@ struct EngramPanelView: View {
 
     // MARK: - Memories
 
+    /// A non-empty query shows the search results; an empty one keeps the
+    /// latest-memories list exactly as it was before the search existed.
     @ViewBuilder private var memoriesSection: some View {
+        if state.isSearchActive {
+            searchResultsSection
+        } else {
+            latestMemoriesSection
+        }
+    }
+
+    @ViewBuilder private var latestMemoriesSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text(L10n.t("Últimas memorias", "Latest memories"))
                     .font(.caption.weight(.semibold))
                 if state.memoriesRead?.freshness == .stale {
-                    Text(L10n.t("· datos antiguos", "· stale data"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    staleBadge
                 }
                 Spacer(minLength: 2)
             }
@@ -342,6 +499,51 @@ struct EngramPanelView: View {
                 noInformation(state.memoriesRead?.error)
             }
         }
+    }
+
+    /// Search results over `/search` (S2/S5), rendered with the same memory row
+    /// as the latest-memories list. Its own read decides what is shown: a failed
+    /// search keeps the last good hits marked stale, a successful search with no
+    /// hits says so, and a read without a value is never an empty success.
+    @ViewBuilder private var searchResultsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(L10n.t("Resultados de la búsqueda", "Search results"))
+                    .font(.caption.weight(.semibold))
+                if state.searchRead?.freshness == .stale {
+                    staleBadge
+                }
+                Spacer(minLength: 2)
+            }
+            if let results = state.searchRead?.value {
+                if results.isEmpty {
+                    // A successful search with no hits is a real empty result,
+                    // never rendered as "no information" (S5).
+                    Text(L10n.t("Sin resultados para esta búsqueda.",
+                                "No results for this search."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(results) { memory in
+                        memoryRow(memory)
+                    }
+                }
+            } else if state.searchRead == nil {
+                // No search read yet: a pending debounce or a request still in
+                // flight. That is not the same as having no information.
+                Text(L10n.t("Buscando memorias…", "Searching memories…"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                noInformation(state.searchRead?.error)
+            }
+        }
+    }
+
+    private var staleBadge: some View {
+        Text(L10n.t("· datos antiguos", "· stale data"))
+            .font(.caption2)
+            .foregroundStyle(.secondary)
     }
 
     private func memoryRow(_ memory: EngramMemory) -> some View {

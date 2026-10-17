@@ -34,7 +34,7 @@ Each PR is opened against its parent slice and retargeted to `main` immediately 
 
 T16 [S3,S4] Core: read-only Engram panel client, response parsers, project resolver, per-read freshness, request builder, retake-context composer + tests — inline; commits `3c30ca0` (models, parsers, resolver, request builder) and `ea97a09` (client reads, retake composer).
 T17 [S2,S5,S6] Panel window per project: counters header, latest memories with full content and copy, entry point from the repository detail window; TUI as a secondary action — inline; commit `5e2c2d6` (546 authored lines).
-T18 [S2] In-app memory search over `/search` — inline. Commit: pending.
+T18 [S2] In-app memory search over `/search` — inline; commit `c3f139f` (206 authored lines; debounce, out-of-order guard, own freshness line, "sin resultados" wording).
 T19 [S2] Copy retake context: `/context` markdown + current Git state — inline. Commit: pending.
 T20 [S2] Recent sessions browsing over `/sessions/recent` — inline. Commit: pending.
 T21 [S6] README documentation, preview build, acceptance checks — inline. Commit: pending.
