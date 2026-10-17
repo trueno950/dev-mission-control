@@ -22,7 +22,7 @@ S7 (TUI): `engram tui` stays reachable as a secondary action, labelled honestly 
 
 ## Tasks
 
-T16 [S3,S4] Core: read-only Engram panel client, response parsers, project resolver, per-read freshness, request builder, retake-context composer + tests — inline. Commit: pending.
+T16 [S3,S4] Core: read-only Engram panel client, response parsers, project resolver, per-read freshness, request builder, retake-context composer + tests — inline; commits `3c30ca0` (models, parsers, resolver, request builder) and `ea97a09` (client reads, retake composer).
 T17 [S2,S5,S6] Panel window per project: counters header, latest memories with full content and copy, entry point from the repository detail window; TUI as a secondary action — inline. Commit: pending.
 T18 [S2] In-app memory search over `/search` — inline. Commit: pending.
 T19 [S2] Copy retake context: `/context` markdown + current Git state — inline. Commit: pending.
