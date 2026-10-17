@@ -102,6 +102,10 @@ final class EngramPanelState: ObservableObject {
     @Published private(set) var projectsRead: EngramRead<[EngramProjectEntry]>?
     @Published private(set) var statsRead: EngramRead<EngramProjectStats>?
     @Published private(set) var memoriesRead: EngramRead<[EngramMemory]>?
+    /// Recent sessions for this project (`GET /sessions/recent`, limit 10).
+    /// Kept distinct from the memories, search, and context reads so this
+    /// source keeps its own freshness and its own retention (S2/S5).
+    @Published private(set) var sessionsRead: EngramRead<[EngramSession]>?
     @Published private(set) var isLoading = false
     /// In-app search over `GET /search` (S2). The query is user input and the
     /// read is kept apart from `memoriesRead`, so a search never overwrites the
@@ -131,6 +135,8 @@ final class EngramPanelState: ObservableObject {
 
     /// Both memory lists read the same number of rows.
     private static let memoriesLimit = 20
+    /// Recent sessions browsed by the panel (S2).
+    private static let sessionsLimit = 10
     /// Idle wait before a search is issued while the user types.
     private static let searchDebounce: Duration = .milliseconds(350)
 
@@ -156,9 +162,9 @@ final class EngramPanelState: ObservableObject {
     }
 
     /// One read pass over every panel source (S3/S4/S5). The project is
-    /// resolved once from `/projects`, then `stats` and `memories` (limit 20)
-    /// are read for it. A failed read is applied through `retainingLastRead`,
-    /// so the previous good value is kept marked stale.
+    /// resolved once from `/projects`, then `stats`, `memories` (limit 20), and
+    /// `sessions` (limit 10) are read for it. A failed read is applied through
+    /// `retainingLastRead`, so the previous good value is kept marked stale.
     func load() async {
         guard !isLoading else { return }
         isLoading = true
@@ -184,9 +190,12 @@ final class EngramPanelState: ObservableObject {
         async let stats = client.stats(project: resolution.project)
         async let memories = client.memories(project: resolution.project,
                                             limit: Self.memoriesLimit)
-        let (newStats, newMemories) = await (stats, memories)
+        async let sessions = client.sessions(project: resolution.project,
+                                            limit: Self.sessionsLimit)
+        let (newStats, newMemories, newSessions) = await (stats, memories, sessions)
         statsRead = newStats.retainingLastRead(statsRead)
         memoriesRead = newMemories.retainingLastRead(memoriesRead)
+        sessionsRead = newSessions.retainingLastRead(sessionsRead)
     }
 
     // MARK: - Search (S2)
@@ -317,6 +326,7 @@ struct EngramPanelView: View {
                     countersSection
                     searchField
                     memoriesSection
+                    sessionsSection
                 }
                 .padding(14)
             }
@@ -611,6 +621,109 @@ struct EngramPanelView: View {
                 noInformation(state.searchRead?.error)
             }
         }
+    }
+
+    // MARK: - Recent sessions
+
+    /// Recent sessions over `/sessions/recent` (S2/S5). The section carries its
+    /// own freshness line with its read time and current failure. A successful
+    /// read with no sessions says "sin sesiones registradas", a read without a
+    /// value is never an empty success, and a failed read keeps the last good
+    /// list marked stale.
+    @ViewBuilder private var sessionsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(L10n.t("Sesiones recientes", "Recent sessions"))
+                    .font(.caption.weight(.semibold))
+                if state.sessionsRead?.freshness == .stale {
+                    staleBadge
+                }
+                Spacer(minLength: 2)
+            }
+            freshnessLine(L10n.t("Sesiones", "Sessions"), read: state.sessionsRead)
+            if let sessions = state.sessionsRead?.value {
+                if sessions.isEmpty {
+                    // A successful read with no sessions is a real empty result,
+                    // never rendered as "no information" (S5).
+                    Text(L10n.t("Sin sesiones registradas", "No recorded sessions"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(sessions) { session in
+                        sessionRow(session)
+                    }
+                }
+            } else if state.isLoading, state.sessionsRead == nil {
+                Text(L10n.t("Cargando sesiones…", "Loading sessions…"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                noInformation(state.sessionsRead?.error)
+            }
+        }
+    }
+
+    private func sessionRow(_ session: EngramSession) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(sessionStartText(session))
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                Text(sessionEndText(session))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Text(observationCountText(session.observationCount))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    /// Start line of a session. A missing start date is stated as such instead
+    /// of showing a fabricated time (S5).
+    private func sessionStartText(_ session: EngramSession) -> String {
+        guard let start = session.startedAt else {
+            return L10n.t("Inicio: sin fecha registrada", "Start: no recorded date")
+        }
+        let time = formatSessionDate(start)
+        return L10n.t("Inicio: \(time)", "Start: \(time)")
+    }
+
+    /// End line of a session. A running session (`endedAt` nil) is explicitly
+    /// "en curso" instead of an invented end time.
+    private func sessionEndText(_ session: EngramSession) -> String {
+        guard let end = session.endedAt else {
+            return L10n.t("Fin: en curso", "End: in progress")
+        }
+        let time = formatSessionDate(end)
+        return L10n.t("Fin: \(time)", "End: \(time)")
+    }
+
+    /// Observation count of one session, singular or plural.
+    private func observationCountText(_ count: Int) -> String {
+        count == 1
+            ? L10n.t("1 observación", "1 observation")
+            : L10n.t("\(count) observaciones", "\(count) observations")
+    }
+
+    /// Localized session time: clock time for today, otherwise a short date and
+    /// time, matching the panel's other read times.
+    private func formatSessionDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        if Calendar.current.isDateInToday(date) {
+            formatter.dateFormat = "HH:mm"
+            return formatter.string(from: date)
+        }
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     private var staleBadge: some View {

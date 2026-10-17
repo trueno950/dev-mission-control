@@ -36,7 +36,7 @@ T16 [S3,S4] Core: read-only Engram panel client, response parsers, project resol
 T17 [S2,S5,S6] Panel window per project: counters header, latest memories with full content and copy, entry point from the repository detail window; TUI as a secondary action — inline; commit `5e2c2d6` (546 authored lines).
 T18 [S2] In-app memory search over `/search` — inline; commit `c3f139f` (206 authored lines; debounce, out-of-order guard, own freshness line, "sin resultados" wording).
 T19 [S2] Copy retake context: `/context` markdown + current Git state — inline; commit `01f741d` (the composer now prints the localized no-information line instead of counters whenever the Git read is not current — RED 10 failing checks → GREEN 440/440).
-T20 [S2] Recent sessions browsing over `/sessions/recent` — inline. Commit: pending.
+T20 [S2] Recent sessions browsing over `/sessions/recent` — inline; commit `8063ab3` (own freshness line, "sin sesiones registradas", "en curso" for an open session).
 T21 [S6] README documentation, preview build, acceptance checks — inline. Commit: pending.
 
 ## Log
