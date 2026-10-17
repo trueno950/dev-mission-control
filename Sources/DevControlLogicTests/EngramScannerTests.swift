@@ -47,6 +47,41 @@ func engramScannerTests() {
         check(false, "garbage date parse threw: \(error)")
     }
 
+    // MARK: - EngramParser.parseLatestSummary (T14/S19)
+
+    do {
+        let json = """
+        [{"id": 1, "title": "recent decision", "type": "decision", "created_at": "2026-10-17 05:00:00"},
+         {"id": 2, "title": "Session summary", "type": "session_summary", "created_at": "2026-10-16 22:10:00"}]
+        """
+        let summary = try EngramParser.parseLatestSummary(Data(json.utf8))
+        check(summary != nil, "session summary found in observations page")
+        checkEqual(summary?.date, dateTime(2026, 10, 16, 22, 10), "summary date comes from its own entry")
+        checkEqual(summary?.title, "Session summary", "summary title preserved")
+    } catch {
+        check(false, "latest summary parse threw: \(error)")
+    }
+
+    do {
+        let json = """
+        [{"id": 1, "title": "t", "type": "decision", "created_at": "2026-10-17 05:00:00"}]
+        """
+        let summary = try EngramParser.parseLatestSummary(Data(json.utf8))
+        check(summary == nil, "page without session summaries yields none")
+    } catch {
+        check(false, "summary-free page parse threw: \(error)")
+    }
+
+    do {
+        let json = """
+        [{"id": 1, "title": "legacy", "created_at": "2026-10-17 05:00:00"}]
+        """
+        let summary = try EngramParser.parseLatestSummary(Data(json.utf8))
+        check(summary == nil, "entries without a type are not summaries")
+    } catch {
+        check(false, "legacy entry parse threw: \(error)")
+    }
+
     // MARK: - EngramParser.parseEngramDate
 
     checkEqual(EngramParser.parseEngramDate("2026-09-20 08:00:00"), dateTime(2026, 9, 20, 8),
@@ -74,10 +109,12 @@ func engramScannerTests() {
         let readAt = date(2026, 10, 15)
         let previous = ActivityStatus(
             activity: ActivityInfo(title: "last session", date: date(2026, 10, 15)),
+            summary: SessionSummaryInfo(title: "Session summary", date: date(2026, 10, 14)),
             available: true, lastReadAt: readAt)
         let unavailable = ActivityStatus(available: false, error: "Engram unreachable")
         let retained = unavailable.retainingLastRead(previous)
         checkEqual(retained.activity, previous.activity, "an Engram failure keeps the last activity")
+        checkEqual(retained.summary, previous.summary, "an Engram failure keeps the last saved summary")
         checkEqual(retained.available, false, "an Engram failure stays reported as unavailable")
         checkEqual(retained.error, "Engram unreachable",
                    "an Engram failure still exposes its current error")

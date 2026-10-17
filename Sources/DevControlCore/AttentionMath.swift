@@ -43,6 +43,18 @@ public struct AttentionItem: Hashable, Sendable, Identifiable {
     }
 }
 
+/// Counts current findings for a dashboard header. Source freshness is shown
+/// separately and is deliberately not counted as an attention notice.
+public struct AttentionSummary: Hashable, Sendable {
+    public let affectedProjects: Int
+    public let notices: Int
+
+    public init(affectedProjects: Int, notices: Int) {
+        self.affectedProjects = affectedProjects
+        self.notices = notices
+    }
+}
+
 /// Pure classification of a repository snapshot into attention items.
 public enum AttentionMath {
     /// Classifies one snapshot. Items are ordered critical first, then
@@ -60,29 +72,29 @@ public enum AttentionMath {
         if snapshot.git.freshness == .current {
             if snapshot.git.changes.conflicts > 0 {
                 let count = snapshot.git.changes.conflicts
-                let branch = snapshot.git.branch ?? "primary checkout"
-                let label = count == 1 ? "merge conflict" : "merge conflicts"
+                let branch = snapshot.git.branch ?? "checkout principal"
+                let label = count == 1 ? "conflicto de merge" : "conflictos de merge"
                 items.append(AttentionItem(kind: .mergeConflict, severity: .critical,
-                                           message: "\(count) \(label) on \(branch)"))
+                                           message: "\(count) \(label) en \(branch)"))
             }
 
             if snapshot.git.unpushedCount > 0 {
                 let branch = snapshot.git.branch ?? "HEAD"
                 items.append(AttentionItem(kind: .unpushedCommits, severity: .warning,
-                                           message: "\(snapshot.git.unpushedCount) unpushed commit\(snapshot.git.unpushedCount == 1 ? "" : "s") on \(branch)"))
+                                           message: "\(snapshot.git.unpushedCount) commit\(snapshot.git.unpushedCount == 1 ? "" : "s") sin subir en \(branch)"))
             }
 
             for worktree in snapshot.git.worktrees {
                 if worktree.changes.conflicts > 0 {
                     let count = worktree.changes.conflicts
-                    let label = count == 1 ? "merge conflict" : "merge conflicts"
+                    let label = count == 1 ? "conflicto de merge" : "conflictos de merge"
                     items.append(AttentionItem(kind: .mergeConflict, severity: .critical,
-                                               message: "Worktree \(worktree.name) has \(count) \(label)",
+                                               message: "Worktree \(worktree.name) tiene \(count) \(label)",
                                                worktreePath: worktree.path))
                 } else if !snapshot.config.isPaused, !worktree.isDirty,
                           worktree.ageDays > thresholds.staleWorktreeDays {
                     items.append(AttentionItem(kind: .staleWorktree, severity: .info,
-                                               message: "Worktree \(worktree.name) idle \(worktree.ageDays) days",
+                                               message: "Worktree \(worktree.name) inactivo \(worktree.ageDays) \(worktree.ageDays == 1 ? "día" : "días")",
                                                worktreePath: worktree.path))
                 }
             }
@@ -92,11 +104,11 @@ public enum AttentionMath {
             for pr in snapshot.pr.prs {
                 if pr.ciFailing {
                     items.append(AttentionItem(kind: .failingCI, severity: .critical,
-                                               message: "PR #\(pr.number) failing CI"))
+                                               message: "PR #\(pr.number) con checks fallidos"))
                 }
                 if pr.ageDays > thresholds.stalePRDays {
                     items.append(AttentionItem(kind: .oldOpenPR, severity: .info,
-                                               message: "PR #\(pr.number) open \(pr.ageDays) days"))
+                                               message: "PR #\(pr.number) abierta \(pr.ageDays) \(pr.ageDays == 1 ? "día" : "días")"))
                 }
             }
         }
@@ -107,11 +119,26 @@ public enum AttentionMath {
             let days = daysBetween(activity.date, and: now, calendar: calendar)
             if days > thresholds.inactivityDays {
                 items.append(AttentionItem(kind: .inactiveProject, severity: .info,
-                                           message: "No Engram activity for \(days) days"))
+                                           message: "Sin actividad de Engram durante \(days) \(days == 1 ? "día" : "días")"))
             }
         }
 
         return sorted(items)
+    }
+
+    /// Counts projects with at least one current finding and all visible
+    /// findings, including informational notices. Source freshness does not
+    /// contribute to either count.
+    public static func summaryCounts(_ snapshots: [RepoSnapshot],
+                                     now: Date,
+                                     calendar: Calendar = .current,
+                                     thresholds: AppConfig) -> AttentionSummary {
+        let items = snapshots.map {
+            classify($0, now: now, calendar: calendar, thresholds: thresholds)
+        }
+        return AttentionSummary(
+            affectedProjects: items.filter { !$0.isEmpty }.count,
+            notices: items.reduce(0) { $0 + $1.count })
     }
 
     /// Whether the repository has an actionable warning or critical finding.

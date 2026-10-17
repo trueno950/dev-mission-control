@@ -90,7 +90,7 @@ func attentionMathTests() {
             snapshot(git: GitStatus(branch: "feat/x", unpushedCount: 2)),
             now: sharedNow, calendar: cal, thresholds: sharedThresholds)
         checkEqual(items.first?.kind, .unpushedCommits, "unpushed item kind")
-        checkEqual(items.first?.message, "2 unpushed commits on feat/x", "unpushed message names branch")
+        checkEqual(items.first?.message, "2 commits sin subir en feat/x", "unpushed message names branch")
     }
 
     // MARK: Worktrees
@@ -102,7 +102,7 @@ func attentionMathTests() {
             snapshot(git: GitStatus(worktrees: [young, old])),
             now: sharedNow, calendar: cal, thresholds: sharedThresholds)
         checkEqual(items.count, 1, "only stale clean worktree flagged")
-        checkEqual(items.first?.message, "Worktree final-127 idle 9 days", "stale worktree message")
+        checkEqual(items.first?.message, "Worktree final-127 inactivo 9 días", "stale worktree message")
         checkEqual(items.first?.severity, .info, "stale clean worktree is info")
         check(!AttentionMath.needsAttention(items), "idle worktree information is not urgent")
     }
@@ -116,7 +116,7 @@ func attentionMathTests() {
         checkEqual(items.count, 1, "conflicted worktree creates one finding")
         checkEqual(items.first?.kind, .mergeConflict, "conflicted worktree kind")
         checkEqual(items.first?.severity, .critical, "conflict requires attention")
-        checkEqual(items.first?.message, "Worktree fix-1 has 2 merge conflicts", "conflict count is explicit")
+        checkEqual(items.first?.message, "Worktree fix-1 tiene 2 conflictos de merge", "conflict count is explicit")
         checkEqual(items.first?.worktreePath, "/r/.atl/fix-1", "conflict retains selected worktree path")
     }
 
@@ -146,7 +146,7 @@ func attentionMathTests() {
         checkEqual(items.count, 1, "failing CI flagged")
         checkEqual(items.first?.kind, .failingCI, "failing CI kind")
         checkEqual(items.first?.severity, .critical, "failing CI severity")
-        checkEqual(items.first?.message, "PR #14 failing CI", "failing CI message")
+        checkEqual(items.first?.message, "PR #14 con checks fallidos", "failing CI message")
     }
 
     do {
@@ -191,7 +191,7 @@ func attentionMathTests() {
             now: sharedNow, calendar: cal, thresholds: sharedThresholds)
         checkEqual(items.count, 1, "inactive project flagged")
         checkEqual(items.first?.kind, .inactiveProject, "inactivity kind")
-        checkEqual(items.first?.message, "No Engram activity for 26 days", "inactivity message names its source")
+        checkEqual(items.first?.message, "Sin actividad de Engram durante 26 días", "inactivity message names its source")
         check(!AttentionMath.needsAttention(items), "inactivity information is not urgent")
     }
 
@@ -279,9 +279,39 @@ func attentionMathTests() {
                                            thresholds: sharedThresholds)
         checkEqual(items.map { $0.severity }, [.critical, .warning, .info],
                    "items sort critical, warning, then information")
-        checkEqual(items[1].message, "1 unpushed commit on main", "evidence-based warning is retained")
-        checkEqual(items[2].message, "Worktree w idle 30 days", "age-only worktree notice stays informational")
+        checkEqual(items[1].message, "1 commit sin subir en main", "evidence-based warning is retained")
+        checkEqual(items[2].message, "Worktree w inactivo 30 días", "age-only worktree notice stays informational")
         check(AttentionMath.needsAttention(items), "mixed items need attention")
+    }
+
+    // MARK: Dashboard summary counts
+
+    do {
+        let snapshots = [
+            RepoSnapshot(
+                config: RepoConfig(id: "one", path: "/tmp/one"),
+                git: GitStatus(unpushedCount: 1,
+                               changes: ChangeCounts(conflicts: 1)),
+                pr: PRStatus(prs: [PRInfo(number: 1, title: "Fix", ageDays: 1,
+                                          ciFailing: true)], available: true)),
+            RepoSnapshot(
+                config: RepoConfig(id: "two", path: "/tmp/two"),
+                pr: PRStatus(prs: [
+                    PRInfo(number: 2, title: "Failing", ageDays: 1, ciFailing: true),
+                    PRInfo(number: 3, title: "Old", ageDays: 10, ciFailing: false)
+                ], available: true)),
+            RepoSnapshot(
+                config: RepoConfig(id: "three", path: "/tmp/three"),
+                git: GitStatus(error: "git unavailable"),
+                pr: PRStatus(available: false, error: "gh unavailable"),
+                activity: ActivityStatus(available: false, error: "Engram unavailable"))
+        ]
+        let summary = AttentionMath.summaryCounts(
+            snapshots, now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+        checkEqual(summary.affectedProjects, 2,
+                   "dashboard count includes only projects with visible findings")
+        checkEqual(summary.notices, 5,
+                   "dashboard notice count matches all visible findings including info")
     }
 
     // MARK: Severity comparable
@@ -355,8 +385,38 @@ func attentionMathTests() {
     }
 }
 
+func worktreeOrderingTests() {
+    // MARK: T12/S17 triage order: conflicts, then changes, then clean
+
+    do {
+        let cleanA = WorktreeInfo(path: "/r/.atl/alpha", name: "alpha", isDirty: false, ageDays: 30)
+        let cleanB = WorktreeInfo(path: "/r/.atl/beta", name: "beta", isDirty: false, ageDays: 9)
+        let dirtySmall = WorktreeInfo(path: "/r/.atl/fix-1", name: "fix-1", isDirty: true, ageDays: 1,
+                                      changes: ChangeCounts(unstaged: 1))
+        let dirtyLarge = WorktreeInfo(path: "/r/.atl/feat-2", name: "feat-2", isDirty: true, ageDays: 2,
+                                      changes: ChangeCounts(staged: 2, untracked: 1))
+        let conflicted = WorktreeInfo(path: "/r/.atl/prop-139", name: "prop-139", isDirty: true, ageDays: 1,
+                                      changes: ChangeCounts(conflicts: 2))
+        let ordered = WorktreeOrdering.sortedForTriage([cleanA, cleanB, dirtySmall, conflicted, dirtyLarge])
+        checkEqual(ordered.map { $0.name }, ["prop-139", "feat-2", "fix-1", "alpha", "beta"],
+                   "conflicts first, then changed, then clean, name order inside groups")
+    }
+
+    do {
+        check(WorktreeOrdering.sortedForTriage([]).isEmpty, "empty worktree list sorts to empty")
+    }
+
+    do {
+        let first = WorktreeInfo(path: "/r/.atl/a", name: "a", isDirty: false, ageDays: 1)
+        let second = WorktreeInfo(path: "/r/.atl/b", name: "b", isDirty: false, ageDays: 2)
+        checkEqual(WorktreeOrdering.sortedForTriage([second, first]).map { $0.name }, ["a", "b"],
+                   "clean worktrees sort by name")
+    }
+}
+
 // Suites wired per task:
 attentionMathTests()
+worktreeOrderingTests()
 gitScannerTests()
 ghScannerTests()
 engramScannerTests()
