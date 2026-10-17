@@ -99,14 +99,24 @@ public struct AppConfig: Codable, Hashable, Sendable {
 public struct WorktreeInfo: Hashable, Sendable {
     public var path: String
     public var name: String
+    public var branch: String?
     public var isDirty: Bool
+    public var dirtyCount: Int
+    /// Whole days since the last commit, used for the idle threshold.
     public var ageDays: Int
+    /// Nil when git could not read the worktree's last commit timestamp.
+    public var lastCommitAt: Date?
 
-    public init(path: String, name: String, isDirty: Bool, ageDays: Int) {
+    public init(path: String, name: String, isDirty: Bool, ageDays: Int,
+                branch: String? = nil, dirtyCount: Int? = nil,
+                lastCommitAt: Date? = nil) {
         self.path = path
         self.name = name
+        self.branch = branch
         self.isDirty = isDirty
+        self.dirtyCount = dirtyCount ?? (isDirty ? 1 : 0)
         self.ageDays = ageDays
+        self.lastCommitAt = lastCommitAt
     }
 }
 

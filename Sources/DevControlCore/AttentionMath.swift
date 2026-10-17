@@ -25,14 +25,21 @@ public struct AttentionItem: Hashable, Sendable, Identifiable {
     public var kind: Kind
     public var severity: Severity
     public var message: String
+    /// Present for worktree findings so the UI can render safe path actions.
+    public var worktreePath: String?
 
-    public init(kind: Kind, severity: Severity, message: String) {
+    public init(kind: Kind, severity: Severity, message: String,
+                worktreePath: String? = nil) {
         self.kind = kind
         self.severity = severity
         self.message = message
+        self.worktreePath = worktreePath
     }
 
-    public var id: String { "\(kind)-\(message)" }
+    public var id: String {
+        if let worktreePath { return "\(kind)-\(worktreePath)" }
+        return "\(kind)-\(message)"
+    }
 }
 
 /// Pure classification of a repository snapshot into attention items.
@@ -67,10 +74,12 @@ public enum AttentionMath {
         for worktree in snapshot.git.worktrees {
             if worktree.isDirty {
                 items.append(AttentionItem(kind: .staleWorktree, severity: .warning,
-                                           message: "Worktree \(worktree.name) has uncommitted changes"))
+                                           message: "Worktree \(worktree.name) has uncommitted changes",
+                                           worktreePath: worktree.path))
             } else if worktree.ageDays > thresholds.staleWorktreeDays {
                 items.append(AttentionItem(kind: .staleWorktree, severity: .info,
-                                           message: "Worktree \(worktree.name) idle \(worktree.ageDays) days"))
+                                           message: "Worktree \(worktree.name) idle \(worktree.ageDays) days",
+                                           worktreePath: worktree.path))
             }
         }
 

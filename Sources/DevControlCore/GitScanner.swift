@@ -54,7 +54,7 @@ public enum ScannerError: Error, CustomStringConvertible {
 }
 
 /// Scans one local repository with git: branch, dirty file count, unpushed
-/// commit count, and linked worktrees (with dirty state and idle age).
+/// commit count, and linked worktrees (branch, dirty count, and last-commit age).
 public struct GitScanner {
     private let git: String
     private let runner: ProcessRunning
@@ -111,30 +111,42 @@ public struct GitScanner {
                                calendar: Calendar) throws -> [WorktreeInfo] {
         let output = try runner.run(git, ["-C", repoPath, "worktree", "list", "--porcelain"], in: nil)
         let blocks = GitParser.parseWorktreeBlocks(output)
+        let linkedBlocks = blocks.filter { !$0.isMain }
+        let timestamps = lastCommitTimestamps(
+            repoPath,
+            commits: linkedBlocks.compactMap(\.headCommit)
+        )
 
         var result: [WorktreeInfo] = []
-        for block in blocks where !block.isMain {
+        for block in linkedBlocks {
             let worktreePath = block.path
-            let dirty = (try? dirtyFileCount(worktreePath)).map { $0 > 0 } ?? false
+            let dirtyCount = (try? dirtyFileCount(worktreePath)) ?? 0
+            let lastCommitAt = block.headCommit.flatMap { timestamps[$0] }
             let ageDays: Int
-            if let timestamp = lastCommitTimestamp(worktreePath) {
+            if let lastCommitAt {
                 ageDays = max(0, (calendar.dateComponents(
-                    [.day], from: calendar.startOfDay(for: timestamp),
+                    [.day], from: calendar.startOfDay(for: lastCommitAt),
                     to: calendar.startOfDay(for: now)).day ?? 0))
             } else {
                 ageDays = 0
             }
             result.append(WorktreeInfo(path: worktreePath,
                                        name: (worktreePath as NSString).lastPathComponent,
-                                       isDirty: dirty, ageDays: ageDays))
+                                       isDirty: dirtyCount > 0, ageDays: ageDays,
+                                       branch: block.branch, dirtyCount: dirtyCount,
+                                       lastCommitAt: lastCommitAt))
         }
         return result
     }
 
-    private func lastCommitTimestamp(_ directory: String) -> Date? {
-        guard let output = try? runner.run(git, ["-C", directory, "log", "-1", "--format=%ct"],
-                                           in: nil) else { return nil }
-        return GitParser.parseCommitTimestamp(output)
+    private func lastCommitTimestamps(_ repoPath: String, commits: [String]) -> [String: Date] {
+        guard !commits.isEmpty,
+              let output = try? runner.run(
+                git,
+                ["-C", repoPath, "log", "--no-walk", "--format=%H%x09%ct"] + commits,
+                in: nil
+              ) else { return [:] }
+        return GitParser.parseCommitTimestamps(output)
     }
 
     private func describe(_ error: Error, for repoPath: String) -> String {
@@ -153,16 +165,21 @@ public enum GitParser {
     }
 
     /// Parses `git worktree list --porcelain` into blocks. The first block is
-    /// the main working tree (`isMain == true`).
-    public static func parseWorktreeBlocks(_ output: String) -> [(path: String, isMain: Bool)] {
-        var blocks: [(path: String, isMain: Bool)] = []
+    /// the main working tree (`isMain == true`); detached worktrees have no branch.
+    public static func parseWorktreeBlocks(_ output: String)
+        -> [(path: String, branch: String?, headCommit: String?, isMain: Bool)] {
+        var blocks: [(path: String, branch: String?, headCommit: String?, isMain: Bool)] = []
         var currentPath: String?
+        var currentBranch: String?
+        var currentHeadCommit: String?
 
         func flush() {
             if let path = currentPath {
-                blocks.append((path, blocks.isEmpty))
+                blocks.append((path, currentBranch, currentHeadCommit, blocks.isEmpty))
             }
             currentPath = nil
+            currentBranch = nil
+            currentHeadCommit = nil
         }
 
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -170,8 +187,16 @@ public enum GitParser {
             if line.hasPrefix("worktree ") {
                 flush()
                 currentPath = String(line.dropFirst("worktree ".count))
+            } else if line.hasPrefix("HEAD "), currentPath != nil {
+                currentHeadCommit = String(line.dropFirst("HEAD ".count))
+            } else if line.hasPrefix("branch "), currentPath != nil {
+                let ref = String(line.dropFirst("branch ".count))
+                let headPrefix = "refs/heads/"
+                currentBranch = ref.hasPrefix(headPrefix)
+                    ? String(ref.dropFirst(headPrefix.count))
+                    : ref
             }
-            // HEAD/branch/bare/detached lines carry no path; ignored here.
+            // Bare/detached lines carry no additional metadata.
         }
         flush()
         return blocks
@@ -182,5 +207,16 @@ public enum GitParser {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let epoch = TimeInterval(trimmed) else { return nil }
         return Date(timeIntervalSince1970: epoch)
+    }
+
+    /// Parses `git log --no-walk --format=%H%x09%ct` rows into commit dates.
+    public static func parseCommitTimestamps(_ output: String) -> [String: Date] {
+        var timestamps: [String: Date] = [:]
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let fields = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+            guard fields.count == 2, let epoch = TimeInterval(fields[1]) else { continue }
+            timestamps[String(fields[0])] = Date(timeIntervalSince1970: epoch)
+        }
+        return timestamps
     }
 }

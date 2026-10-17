@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import DevControlCore
 
@@ -152,20 +153,31 @@ struct ProjectCard: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(appState.items(for: snapshot)) { item in
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Circle()
-                        .fill(color(for: item.severity))
-                        .frame(width: 6, height: 6)
-                    Text(item.message)
-                        .font(.caption)
-                        .foregroundStyle(item.severity == .info ? .secondary : .primary)
-                }
+                attentionRow(item)
             }
             unavailableLine
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func attentionRow(_ item: AttentionItem) -> some View {
+        if item.kind == .staleWorktree,
+           let path = item.worktreePath,
+           let worktree = snapshot.git.worktrees.first(where: { $0.path == path }) {
+            WorktreeTriageRow(worktree: worktree, severity: item.severity)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Circle()
+                    .fill(color(for: item.severity))
+                    .frame(width: 6, height: 6)
+                Text(item.message)
+                    .font(.caption)
+                    .foregroundStyle(item.severity == .info ? .secondary : .primary)
+            }
+        }
     }
 
     /// S5: sources that could not be consulted surface as unavailable,
@@ -191,6 +203,92 @@ struct ProjectCard: View {
         case .warning: return .orange
         case .info: return .secondary
         }
+    }
+}
+
+/// Compact row for a repository with nothing to flag.
+/// Detailed, read-only triage row for a linked worktree.
+struct WorktreeTriageRow: View {
+    let worktree: WorktreeInfo
+    let severity: AttentionItem.Severity
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 7) {
+            Circle()
+                .fill(severityColor)
+                .frame(width: 6, height: 6)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(worktree.name)
+                        .font(.caption.weight(.semibold))
+                    Text(worktree.branch ?? "detached")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Text(statusSummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(worktree.path)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 2)
+            Button(action: revealInFinder) {
+                Image(systemName: "folder")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("Reveal in Finder")
+            .accessibilityLabel("Reveal \(worktree.name) in Finder")
+
+            Button(action: copyPath) {
+                Image(systemName: "doc.on.doc")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("Copy worktree path")
+            .accessibilityLabel("Copy path for \(worktree.name)")
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var statusSummary: String {
+        let commitAge: String
+        if worktree.lastCommitAt == nil {
+            commitAge = "last commit date unavailable"
+        } else if worktree.ageDays == 0 {
+            commitAge = "last commit today"
+        } else {
+            commitAge = "last commit \(worktree.ageDays) day\(worktree.ageDays == 1 ? "" : "s") ago"
+        }
+
+        if worktree.dirtyCount == 0 {
+            return "Clean · \(commitAge)"
+        }
+        return "\(worktree.dirtyCount) changed file\(worktree.dirtyCount == 1 ? "" : "s") · \(commitAge)"
+    }
+
+    private var severityColor: Color {
+        switch severity {
+        case .critical: return .red
+        case .warning: return .orange
+        case .info: return .secondary
+        }
+    }
+
+    private func revealInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([
+            URL(fileURLWithPath: worktree.path, isDirectory: true)
+        ])
+    }
+
+    private func copyPath() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(worktree.path, forType: .string)
     }
 }
 

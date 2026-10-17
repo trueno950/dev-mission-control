@@ -23,7 +23,9 @@ Repositories with no findings render as clean rows. Sources that cannot be consu
 
 All access is read-only. The app never mutates a repository and stores no credentials.
 
-- **Local git** (`/usr/bin/git`): current branch, `git status --porcelain`, unpushed commit count (`rev-list @{u}..HEAD`), and `git worktree list --porcelain` with per-worktree dirty state and last-commit age.
+- **Local git** (`/usr/bin/git`): current branch, `git status --porcelain`, unpushed commit count (`rev-list @{u}..HEAD`), and `git worktree list --porcelain` with each linked worktree's branch, changed-file count, dirty state, and last-commit age.
+
+Flagged worktrees show their name, branch (or `detached`), changed-file count, last-commit age, and full path. Use the row actions to reveal a worktree in Finder or copy its path. These actions are read-only: the app never pushes commits or removes worktrees.
 - **`gh` CLI**: `gh pr list -R <owner/repo> --state open --json number,title,createdAt,statusCheckRollup` for open PR age and CI state. The slug is taken from the config when set, otherwise derived from the `origin` remote.
 - **Engram HTTP API**: `GET http://127.0.0.1:7437/observations?project=<name>&limit=1` for the most recent agent activity of the project.
 

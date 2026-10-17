@@ -55,15 +55,21 @@ func gitScannerTests() {
 
         worktree /repos/demo/.atl/fix-131
         HEAD 9998887
-        branch refs/heads/fix-131
+        branch refs/heads/feature/fix-131
 
         """
         let blocks = GitParser.parseWorktreeBlocks(output)
         checkEqual(blocks.count, 3, "porcelain worktree list yields one block per worktree")
         check(blocks[0].isMain, "first block is the main worktree")
+        checkEqual(blocks[0].branch, "main", "main branch parsed from refs/heads prefix")
+        checkEqual(blocks[0].headCommit, "abc1234", "main worktree HEAD parsed")
         checkEqual(blocks[1].path, "/repos/demo/.atl/final-127", "detached worktree path parsed")
+        checkEqual(blocks[1].branch, nil, "detached worktree has no branch")
+        checkEqual(blocks[1].headCommit, "def5678", "detached worktree HEAD parsed")
         check(!blocks[1].isMain, "linked worktrees are not main")
         checkEqual(blocks[2].path, "/repos/demo/.atl/fix-131", "branch worktree path parsed")
+        checkEqual(blocks[2].branch, "feature/fix-131", "nested branch name is preserved")
+        checkEqual(blocks[2].headCommit, "9998887", "branch worktree HEAD parsed")
     }
 
     do {
@@ -78,6 +84,13 @@ func gitScannerTests() {
                Date(timeIntervalSince1970: 1_792_152_000), "epoch timestamp parsed")
     check(GitParser.parseCommitTimestamp("") == nil, "empty timestamp yields nil")
     check(GitParser.parseCommitTimestamp("not-a-number") == nil, "garbage timestamp yields nil")
+
+    let timestamps = GitParser.parseCommitTimestamps("abc123\t1792152000\ndef456\t1792152060\ninvalid\n")
+    checkEqual(timestamps["abc123"], Date(timeIntervalSince1970: 1_792_152_000),
+               "batch commit timestamp maps hash to date")
+    checkEqual(timestamps["def456"], Date(timeIntervalSince1970: 1_792_152_060),
+               "batch parser handles multiple commits")
+    checkEqual(timestamps.count, 2, "batch parser ignores malformed rows")
 
     // MARK: - GitScanner.scan
 
@@ -123,7 +136,7 @@ func gitScannerTests() {
 
         worktree /repos/demo/.atl/fix-131
         HEAD 999
-        detached
+        branch refs/heads/feature/fix-131
 
         """
         // Age: final-127 last commit 9 days before `now`; fix-131 1 day before.
@@ -152,9 +165,9 @@ func gitScannerTests() {
             "-C /repos/demo rev-list --count @{u}..HEAD": .success("0\n"),
             "-C /repos/demo worktree list --porcelain": .success(linked),
             "-C /repos/demo/.atl/final-127 status --porcelain=v1": .success(""),
-            "-C /repos/demo/.atl/fix-131 status --porcelain=v1": .success(" M x.swift\n"),
-            "-C /repos/demo/.atl/final-127 log -1 --format=%ct": .success("\(nineDaysAgo)\n"),
-            "-C /repos/demo/.atl/fix-131 log -1 --format=%ct": .success("\(oneDayAgo)\n"),
+            "-C /repos/demo/.atl/fix-131 status --porcelain=v1": .success(" M x.swift\n?? new.txt\nA  z.swift\n"),
+            "-C /repos/demo log --no-walk --format=%H%x09%ct def 999":
+                .success("def\t\(nineDaysAgo)\n999\t\(oneDayAgo)\n"),
         ])
 
         let scanner = GitScanner(runner: exact, pathExists: { _ in true })
@@ -163,9 +176,16 @@ func gitScannerTests() {
         checkEqual(status.worktrees.count, 2, "both linked worktrees scanned")
         if status.worktrees.count >= 2 {
             checkEqual(status.worktrees[0].name, "final-127", "worktree name from path")
+            checkEqual(status.worktrees[0].branch, nil, "detached worktree branch remains nil")
             check(!status.worktrees[0].isDirty, "clean worktree not dirty")
+            checkEqual(status.worktrees[0].dirtyCount, 0, "clean worktree has zero changed files")
             checkEqual(status.worktrees[0].ageDays, 9, "worktree age from last commit")
+            checkEqual(status.worktrees[0].lastCommitAt,
+                       Date(timeIntervalSince1970: TimeInterval(nineDaysAgo)!),
+                       "last commit timestamp retained")
             check(status.worktrees[1].isDirty, "dirty worktree detected per worktree")
+            checkEqual(status.worktrees[1].dirtyCount, 3, "dirty worktree reports changed file count")
+            checkEqual(status.worktrees[1].branch, "feature/fix-131", "worktree branch parsed")
             checkEqual(status.worktrees[1].ageDays, 1, "recent worktree age")
         }
     }

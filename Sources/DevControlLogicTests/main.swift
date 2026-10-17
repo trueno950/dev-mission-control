@@ -102,6 +102,7 @@ func attentionMathTests() {
         checkEqual(items.first?.kind, .staleWorktree, "dirty worktree kind")
         checkEqual(items.first?.severity, .warning, "dirty worktree severity")
         checkEqual(items.first?.message, "Worktree fix-1 has uncommitted changes", "dirty worktree message")
+        checkEqual(items.first?.worktreePath, "/r/.atl/fix-1", "worktree finding retains actionable path")
     }
 
     do {
