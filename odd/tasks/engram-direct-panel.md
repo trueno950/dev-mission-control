@@ -37,7 +37,7 @@ T17 [S2,S5,S6] Panel window per project: counters header, latest memories with f
 T18 [S2] In-app memory search over `/search` — inline; commit `c3f139f` (206 authored lines; debounce, out-of-order guard, own freshness line, "sin resultados" wording).
 T19 [S2] Copy retake context: `/context` markdown + current Git state — inline; commit `01f741d` (the composer now prints the localized no-information line instead of counters whenever the Git read is not current — RED 10 failing checks → GREEN 440/440).
 T20 [S2] Recent sessions browsing over `/sessions/recent` — inline; commit `8063ab3` (own freshness line, "sin sesiones registradas", "en curso" for an open session).
-T21 [S6] README documentation, preview build, acceptance checks — inline. Commit: pending.
+T21 [S6] README documentation, preview build, acceptance checks — inline; commit `99d8482`; preview `build/DevMissionControl-preview-engram.app` built from 440/440 checks and `git diff --check` clean; owner visual acceptance pending.
 
 ## Log
 

@@ -27,7 +27,7 @@ All access is read-only. The app never mutates a repository and stores no creden
 
 The primary checkout branch is distinct from linked-worktree branches. Pending changes are a repository-state signal, not a claim about agent liveness. Actions remain read-only: the app never commits, pushes, merges, or removes worktrees.
 - **`gh` CLI**: `gh pr list -R <owner/repo> --state open --json number,title,createdAt,statusCheckRollup,headRefName,headRefOid,url` for open PR age, CI state, and verified worktree association. The slug is taken from the config when set, otherwise derived from the `origin` remote.
-- **Engram HTTP API**: `GET http://127.0.0.1:7437/observations?project=<name>&limit=1` for the most recent agent activity of the project.
+- **Engram HTTP API** (`http://127.0.0.1:7437`): `GET /observations?project=<name>&limit=100` for the most recent agent activity and the saved session summary inside that page, plus the read-only panel reads `GET /stats`, `GET /projects`, `GET /observations` (full content), `GET /search`, `GET /sessions/recent`, and `GET /context`. Engram's writing endpoints (`POST /prompts`, `POST /sessions`) are never used and the app never opens Engram's SQLite store.
 
 ## Source states and freshness
 
@@ -39,7 +39,7 @@ Each source — local Git, the `gh` CLI, and the Engram HTTP API — is read ind
 | Stale | The latest read failed after an earlier success; the last valid value is retained in memory and the current failure is shown separately as unavailable |
 | Unavailable | The latest read failed and no earlier value exists |
 
-A failed refresh never erases the last good value: the retained value is marked stale and the current error is reported alongside it, so a `gh` failure is never an empty PR list and an Engram outage is never "no activity". Only current reads create findings; an unavailable or stale source is "no information", not an attention alert. Source freshness renders as one airy row per source (Git, GitHub, Engram) with the read time inline (UI wording: `actual` / `antiguo` / `no disponible`; Engram shows `Conectado` / `Sin conexión`). GitHub rows show the open-PR count; Engram rows show the latest activity date and title plus the saved summary, and an **Abrir memorias** action opens `engram tui` in Terminal (the local Engram server has no web dashboard). Details and tooltips include the full data plus current source errors. Each source degrades independently, so local Git stays queryable when `gh` or Engram is down.
+A failed refresh never erases the last good value: the retained value is marked stale and the current error is reported alongside it, so a `gh` failure is never an empty PR list and an Engram outage is never "no activity". Only current reads create findings; an unavailable or stale source is "no information", not an attention alert. Source freshness renders as one airy row per source (Git, GitHub, Engram) with the read time inline (UI wording: `actual` / `antiguo` / `no disponible`; Engram shows `Conectado` / `Sin conexión`). GitHub rows show the open-PR count; Engram rows show the latest activity date and title plus the saved summary, and an **Abrir panel** action opens the in-app memories window described below; a secondary **TUI global** action still opens `engram tui` in Terminal (the local Engram server has no web dashboard), labelled honestly because it is global and takes a few seconds to leave its loading box. Details and tooltips include the full data plus current source errors. Each source degrades independently, so local Git stays queryable when `gh` or Engram is down.
 
 Engram's connection state is shown separately from its saved memory. `Conectado · consultado…` means the recent HTTP read succeeded; it does **not** claim the memory reflects the current code. When the bounded observations page contains a saved session summary (an observation of type `session_summary`), the card also shows `Resumen guardado · <date>`; when none is present in the page, the badge says `Sin resumen guardado` instead of inventing one.
 
@@ -48,6 +48,20 @@ Engram's connection state is shown separately from its saved memory. `Conectado 
 The panel keeps compact summary cards: repository name, primary checkout branch, worktree count, primary notice, and per-source freshness. A segmented Atención/Todos selector gives visible access to every tracked project, including clean or paused ones. Clicking a card opens a per-project detail window; clicking a notice opens the detail window focused (highlighted and scrolled) on that notice's worktree. Inside the detail window, worktrees are ordered conflicts first, then worktrees with pending changes; clean worktrees stay collapsed under "Ver los N worktrees limpios". Git-unavailable worktrees are not presented as an empty list. Pause or resume a project from its **Settings → Repositorios** row.
 
 Scans are non-overlapping: a manual or scheduled refresh is skipped while one is already running, so the panel never blocks. Every external operation is bounded — `git` and `gh` subprocesses time out after 30 s by default, and Engram requests use a 3 s request / 5 s resource timeout. Periodic scanning never calls a model. Subprocesses are launched by executable path with a separate argument vector; repository paths are passed as discrete `-C` arguments and are never concatenated into a shell command string.
+
+## Engram memories panel
+
+Every repository has a read-only **Memorias de Engram** window — opened from the detail window's **Memorias de Engram** row or from the Engram source badge's **Abrir panel** action — that reads the local Engram HTTP API directly instead of opening a terminal:
+
+| Section | Read | What it shows |
+| --- | --- | --- |
+| Header | `GET /projects`, `GET /stats?project=` | The resolved Engram project and where the match came from, plus the sessions, observations, and prompts counters |
+| Memories | `GET /observations?project=&limit=20` | The latest memories with type, title, and date, each expandable in place to its full content and copyable |
+| Search | `GET /search?q=&project=` | Full-text search over that project's memories, debounced 350 ms, with out-of-order responses discarded |
+| Sesiones recientes | `GET /sessions/recent?project=&limit=10` | Start, end (`en curso` when the session has not ended), and observation count per session |
+| Retake context | `GET /context?project=` | A **Copiar contexto para retomar** action that composes the Engram context markdown with the current Git state (branch, pending counts, unpushed commits, worktrees) for pasting into an agent session |
+
+Every section is its own source with its own freshness line and read time, so an unavailable read shows "sin información" and the current error instead of an empty list, and a failed refresh keeps the last good value marked stale. The panel never writes to Engram, never opens its SQLite store, and never calls a model. A repository matches its Engram project by the configured project name first, then by the most specific registered `directories` prefix from `GET /projects`, then by folder name — the Engram project name does not always match the folder (for example `car-rental-cancun` holds the memories of the folder `rental-car-cancun`).
 
 ## Worktree actions
 
@@ -150,15 +164,21 @@ Decoding is tolerant: omitted keys fall back to defaults, so configs written by 
 - **No stale local-branch detection.** Squash merges make `git branch --no-merged` unreliable, so branches that look unmerged may already be merged upstream. This was deliberately left out of v1.
 - **Worktree age is derived from its last commit date**, not from when the worktree was created or linked.
 - **Unavailable sources never fabricate findings, and stale data is identified.** If `gh` is missing or unauthenticated, PR/CI findings are skipped for that repo and the source is unavailable; when a previous successful read exists, its PR list is retained and marked stale rather than emptied. If Engram is unreachable, activity findings are skipped and the source is unavailable; the last known activity is retained as stale. A missing or invalid repo path is an unavailable Git source, not a clean result or an attention alert; independent current sources remain classifiable.
-- **Read-only by contract.** The app runs `git` queries, `gh pr list`, and an Engram `GET` only; it stores no credentials (git and the `gh` keyring stay external).
+- **Read-only by contract.** The app runs `git` queries, `gh pr list`, and Engram `GET` reads only; it stores no credentials (git and the `gh` keyring stay external).
+- **The Engram panel matches by registered directory, and an ancestor registration can win.** The panel picks the most specific registered directory prefix, so a repository whose parent directory is registered to another project inherits that project when it has no registration of its own (Engram registers `~/Documents/Projects` for `dev-mission-control`). The configured `engramProject` always wins, and the panel states which origin it used.
+- **The Engram TUI stays available but is global and slow.** `engram tui` needs about five seconds to leave its "Loading stats..." box and always shows global numbers, so it is a secondary action for administration rather than the per-project answer the panel gives.
 
 ## Project layout
 
 ```
 Sources/DevControlCore/        Models, config store, attention math, scanners (git, gh, Engram)
+  EngramPanel.swift            Panel models, response parsers, project resolver, request builder
+  EngramPanelClient.swift      Read-only Engram HTTP reads and the retake-context composer
 Sources/DevMissionControl/     Menu bar app: AppState, panel, settings window, --scan-once
+  EngramPanelView.swift        Per-project Engram memories window (counters, memories, search, sessions, copy)
 Sources/DevControlLogicTests/  Executable logic tests (custom check harness)
 scripts/build-app.sh           CLT-only build + .app bundle assembly
 Packaging/Info.plist           Bundle metadata
-odd/tasks/dev-mission-control.md  ODD feature spec and log
+odd/tasks/dev-mission-control.md   ODD feature spec and log (attention delivery)
+odd/tasks/engram-direct-panel.md   ODD feature spec and log (Engram direct panel)
 ```
