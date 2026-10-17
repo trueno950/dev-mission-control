@@ -1,6 +1,6 @@
 # Dev Mission Control
 
-A native macOS menu bar app that answers **"where was I and what needs attention?"** across all your local projects in one click. Click the scope icon in the menu bar to open a borderless panel with compact project cards, a visible Atención/Todos selector, per-source freshness, and per-project detail windows. The user interface is Spanish (worktree, staged, unstaged, untracked, diff, and PR stay as technical terms).
+A native macOS menu bar app that answers **"where was I and what needs attention?"** across all your local projects in one click. Click the scope icon in the menu bar to open a borderless panel with compact project cards, a visible Atención/Todos selector, per-source freshness, and per-project detail windows. The interface language follows the system automatically (Spanish for `es*` systems, English otherwise); worktree, staged, unstaged, untracked, diff, and PR stay as technical terms.
 
 ## What it flags
 
@@ -17,7 +17,7 @@ For each tracked project, Dev Mission Control separates pending local work from 
 | Worktree `X` idle too long | A clean linked worktree's last commit is older than the worktree threshold and its project is not paused | info |
 | Engram inactivity | Engram is available and its latest observation is older than the inactivity threshold; project is not paused | info |
 
-A project is paused only when explicitly configured as paused. Pausing suppresses Engram inactivity and idle-clean-worktree notices; it does not hide conflicts, failing checks, or unpushed commits. File modification dates are not used to infer agent activity, and a worktree's last-commit age stays informational: it is neither the local modification time nor agent activity. Informational findings are not urgent, but remain visible notices. The panel header distinguishes projects with current findings from the total visible findings (for example, **"2 proyectos · 5 avisos"**). Source states are reported separately and do not inflate those counts. Findings are written in Spanish (for example, "Worktree prop-139 tiene 2 conflictos de merge", "PR #14 con checks fallidos").
+A project is paused only when explicitly configured as paused. Pausing suppresses Engram inactivity and idle-clean-worktree notices; it does not hide conflicts, failing checks, or unpushed commits. File modification dates are not used to infer agent activity, and a worktree's last-commit age stays informational: it is neither the local modification time nor agent activity. Informational findings are not urgent, but remain visible notices. The panel header distinguishes projects with current findings from the total visible findings (for example, **"2 proyectos · 5 avisos"** / "2 projects · 5 notices"). Source states are reported separately and do not inflate those counts. Findings follow the system language (for example, "Worktree prop-139 tiene 2 conflictos de merge" / "Worktree prop-139 has 2 merge conflicts", "PR #14 con checks fallidos" / "PR #14 failing CI").
 
 ## Data sources
 
@@ -39,7 +39,7 @@ Each source — local Git, the `gh` CLI, and the Engram HTTP API — is read ind
 | Stale | The latest read failed after an earlier success; the last valid value is retained in memory and the current failure is shown separately as unavailable |
 | Unavailable | The latest read failed and no earlier value exists |
 
-A failed refresh never erases the last good value: the retained value is marked stale and the current error is reported alongside it, so a `gh` failure is never an empty PR list and an Engram outage is never "no activity". Only current reads create findings; an unavailable or stale source is "no information", not an attention alert. Each project card shows Git, GitHub, and Engram state with the last successful read time (UI wording: `actual` / `antiguo` / `no disponible`; Engram shows `Conectado` / `Sin conexión`); expanded details include current source errors. Each source degrades independently, so local Git stays queryable when `gh` or Engram is down.
+A failed refresh never erases the last good value: the retained value is marked stale and the current error is reported alongside it, so a `gh` failure is never an empty PR list and an Engram outage is never "no activity". Only current reads create findings; an unavailable or stale source is "no information", not an attention alert. Each project card shows Git, GitHub, and Engram state with the last successful read time inline (UI wording: `actual` / `antiguo` / `no disponible`; Engram shows `Conectado` / `Sin conexión`). GitHub also shows its open-PR count, and Engram shows its latest activity date and saved summary inline; details and tooltips include the full data plus current source errors. Each source degrades independently, so local Git stays queryable when `gh` or Engram is down.
 
 Engram's connection state is shown separately from its saved memory. `Conectado · consultado…` means the recent HTTP read succeeded; it does **not** claim the memory reflects the current code. When the bounded observations page contains a saved session summary (an observation of type `session_summary`), the card also shows `Resumen guardado · <date>`; when none is present in the page, the badge says `Sin resumen guardado` instead of inventing one.
 
@@ -95,7 +95,7 @@ It prints a check-count summary when everything is green.
 build/DevMissionControl.app/Contents/MacOS/DevMissionControl --scan-once
 ```
 
-The exit code is `1` when any attention item is found and `0` when everything is clean. Missing sources are printed as `unavailable (...)`.
+The exit code is `1` when any attention item is found and `0` when everything is clean. Output labels follow the system language (`branch:`/`rama:`, `unavailable`/`no disponible`, `clean`/`sin hallazgos`).
 
 ## Configuration
 
@@ -141,7 +141,7 @@ The file is created on first save (from the Settings window). Set the `DMC_CONFI
 | `inactivityDays` | Engram inactivity threshold in days (default 14) |
 | `editorApplicationPath` | Optional application bundle path selected in Settings; omitted or `null` disables the Editor action |
 
-Decoding is tolerant: omitted keys fall back to defaults, so configs written by older versions keep loading. Repositories are added and removed in **Ajustes**; each row has an independent Activo/Pausado status label and a "Pausar proyecto" switch; thresholds are edited with steppers, and the Editor application is selected with the application picker.
+Decoding is tolerant: omitted keys fall back to defaults, so configs written by older versions keep loading. Repositories are added and removed in **Ajustes**; each row has an independent Activo/Pausado status label and a "Pausar proyecto" switch; thresholds are edited with steppers, and the Editor application is selected with the application picker, which opens anchored at `/Applications` and accepts only application bundles.
 
 ## Design decisions and limitations
 
