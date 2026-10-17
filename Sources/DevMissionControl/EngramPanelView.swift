@@ -148,6 +148,12 @@ final class EngramPanelState: ObservableObject {
     /// is no longer current is discarded, so out-of-order responses cannot
     /// overwrite a newer search.
     private var issuedSearchQuery: String?
+    /// Monotonic id of the most recent search request. A reply whose id is no
+    /// longer current is discarded even when it was issued for the same query.
+    private var searchRequestID = 0
+    /// Query the retained search read belongs to, so a value read for one query
+    /// is never displayed under another (S5).
+    private var searchReadQuery: String?
     /// Pending idle-debounce task; cancelled by the next keystroke or submit.
     private var searchDebounceTask: Task<Void, Never>?
     /// Pending "Copied" confirmation reset, cancelled by a newer copy.
@@ -172,25 +178,53 @@ final class EngramPanelState: ObservableObject {
 
         let client = self.client
         let projects = await client.projects()
-        let resolution = EngramProjectResolver.resolve(
-            repoPath: repoPath,
-            entries: projects.value ?? [],
-            configuredName: configuredEngramProject)
-        projectName = resolution.project
-        if let configured = configuredEngramProject,
-           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            projectOrigin = .configured
-        } else if resolution.matchedByDirectory {
-            projectOrigin = .directory
-        } else {
-            projectOrigin = .folderName
-        }
         projectsRead = projects.retainingLastRead(projectsRead)
 
-        async let stats = client.stats(project: resolution.project)
-        async let memories = client.memories(project: resolution.project,
+        // S4/S5: the project is pinned for every read. A failed `/projects`
+        // read keeps the project the retained values belong to instead of
+        // falling back to the folder name, so one project's header never shows
+        // another project's retained data.
+        let project: String
+        let origin: EngramProjectOrigin
+        if let configured = configuredEngramProject,
+           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            project = configured
+            origin = .configured
+        } else if projects.value != nil {
+            let resolution = EngramProjectResolver.resolve(
+                repoPath: repoPath,
+                entries: projects.value ?? [],
+                configuredName: configuredEngramProject)
+            project = resolution.project
+            origin = resolution.matchedByDirectory ? .directory : .folderName
+        } else if let pinned = projectName {
+            project = pinned
+            origin = projectOrigin
+        } else {
+            project = EngramProjectResolver.resolve(
+                repoPath: repoPath,
+                entries: [],
+                configuredName: configuredEngramProject).project
+            origin = .folderName
+        }
+
+        // A different project means every retained value belongs to the old
+        // one: drop them instead of showing mixed data (S5).
+        if let previous = projectName, previous != project {
+            statsRead = nil
+            memoriesRead = nil
+            sessionsRead = nil
+            contextRead = nil
+            searchRead = nil
+            searchReadQuery = nil
+        }
+        projectName = project
+        projectOrigin = origin
+
+        async let stats = client.stats(project: project)
+        async let memories = client.memories(project: project,
                                             limit: Self.memoriesLimit)
-        async let sessions = client.sessions(project: resolution.project,
+        async let sessions = client.sessions(project: project,
                                             limit: Self.sessionsLimit)
         let (newStats, newMemories, newSessions) = await (stats, memories, sessions)
         statsRead = newStats.retainingLastRead(statsRead)
@@ -233,15 +267,21 @@ final class EngramPanelState: ObservableObject {
             return
         }
         issuedSearchQuery = query
+        searchRequestID += 1
+        let requestID = searchRequestID
         isSearching = true
         let read = await client.search(query: query, project: resolvedProject,
                                        limit: Self.memoriesLimit)
-        // Out-of-order guard: the query changed or was cleared while this
-        // request was in flight, so its reply is discarded (and its spinner is
-        // left to the request that is still current).
-        guard issuedSearchQuery == query, normalizedSearchQuery == query else { return }
+        // Out-of-order guard: the query changed, was cleared, or a newer
+        // request was issued while this one was in flight, so its reply is
+        // discarded (and its spinner is left to the request that is current).
+        guard searchRequestID == requestID, issuedSearchQuery == query,
+              normalizedSearchQuery == query else { return }
         isSearching = false
-        searchRead = read.retainingLastRead(searchRead)
+        // Only a value read for the same query may be retained; hits from an
+        // earlier query are never displayed under this one (S5).
+        searchRead = read.retainingLastRead(searchReadQuery == query ? searchRead : nil)
+        searchReadQuery = query
     }
 
     /// Idle debounce after a keystroke: only the last edit of a burst issues a
@@ -252,6 +292,12 @@ final class EngramPanelState: ObservableObject {
         guard isSearchActive else {
             clearSearch()
             return
+        }
+        // The retained source belongs to the query it was read for, so a new
+        // query drops it instead of showing the earlier query's hits (S5).
+        if searchReadQuery != normalizedSearchQuery {
+            searchRead = nil
+            searchReadQuery = nil
         }
         searchDebounceTask = Task { [weak self] in
             try? await Task.sleep(for: Self.searchDebounce)
@@ -277,8 +323,10 @@ final class EngramPanelState: ObservableObject {
         searchDebounceTask?.cancel()
         searchDebounceTask = nil
         issuedSearchQuery = nil
+        searchRequestID += 1
         isSearching = false
         searchRead = nil
+        searchReadQuery = nil
     }
 
     // MARK: - Retake context (S2)
