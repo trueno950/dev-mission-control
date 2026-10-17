@@ -95,7 +95,7 @@ It prints a check-count summary when everything is green.
 build/DevMissionControl.app/Contents/MacOS/DevMissionControl --scan-once
 ```
 
-The exit code is `1` when any attention item is found and `0` when everything is clean. Missing sources are printed as `no disponible (...)` and clean repos as `sin hallazgos`.
+The exit code is `1` when any attention item is found and `0` when everything is clean. Missing sources are printed as `unavailable (...)`.
 
 ## Configuration
 

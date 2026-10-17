@@ -116,13 +116,13 @@ private func runScanOnceAndExit() -> Never {
                                            thresholds: config)
 
         print("== \(repo.id) (\(repo.path))")
-        if let branch = git.branch { print("   rama: \(branch)") }
-        if !pr.available, let error = pr.error { print("   prs: no disponible (\(error))") }
+        if let branch = git.branch { print("   branch: \(branch)") }
+        if !pr.available, let error = pr.error { print("   prs: unavailable (\(error))") }
         if !activity.available, let error = activity.error {
-            print("   engram: no disponible (\(error))")
+            print("   engram: unavailable (\(error))")
         }
         if items.isEmpty {
-            print("   sin hallazgos")
+            print("   clean")
         } else {
             exitCode = 1
             for item in items {

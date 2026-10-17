@@ -3,15 +3,29 @@ import SwiftUI
 import DevControlCore
 
 /// Opens one activating detail window per repository (S17). The panel stays
-/// compact; triage of many worktrees happens here.
+/// compact; triage of many worktrees happens here. The view state is kept per
+/// repository so a reused window applies the newly requested notice focus
+/// instead of silently dropping it.
 @MainActor
 final class RepositoryDetailWindowController {
     private var windows: [String: NSWindow] = [:]
+    private var states: [String: DetailViewState] = [:]
 
     func show(appState: AppState,
               repoPath: String,
               focusWorktreePath: String?,
               onOpenSettings: @escaping () -> Void) {
+        let state: DetailViewState
+        if let existing = states[repoPath] {
+            state = existing
+        } else {
+            state = DetailViewState(focus: focusWorktreePath,
+                                    showCleanWorktrees: focusedWorktreeIsClean(
+                                        appState: appState, repoPath: repoPath,
+                                        focus: focusWorktreePath))
+            states[repoPath] = state
+        }
+
         let window: NSWindow
         if let existing = windows[repoPath] {
             window = existing
@@ -19,7 +33,7 @@ final class RepositoryDetailWindowController {
             let hosting = NSHostingController(rootView: RepositoryDetailView(
                 appState: appState,
                 repoPath: repoPath,
-                focusWorktreePath: focusWorktreePath,
+                state: state,
                 onOpenSettings: onOpenSettings))
             let newWindow = NSWindow(contentViewController: hosting)
             newWindow.styleMask = [.titled, .closable, .resizable, .miniaturizable]
@@ -29,16 +43,38 @@ final class RepositoryDetailWindowController {
             windows[repoPath] = newWindow
         }
 
+        // Forward the focus on every presentation, including reuse. Clearing
+        // first makes re-selecting the same notice still trigger the change.
+        state.focus = nil
+        state.focus = focusWorktreePath
+        if focusedWorktreeIsClean(appState: appState, repoPath: repoPath,
+                                  focus: focusWorktreePath) {
+            state.showCleanWorktrees = true
+        }
+
         let name = appState.snapshots.first { $0.config.path == repoPath }?.config.id
             ?? (repoPath as NSString).lastPathComponent
         window.title = "Mission Control — \(name)"
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
+
+    private func focusedWorktreeIsClean(appState: AppState,
+                                        repoPath: String,
+                                        focus: String?) -> Bool {
+        guard let focus,
+              let snapshot = appState.snapshots.first(where: { $0.config.path == repoPath }),
+              let worktree = snapshot.git.worktrees.first(where: { $0.path == focus }) else {
+            return false
+        }
+        return WorktreeOrdering.rank(worktree) == 2
+    }
 }
 
-/// Local UI state for one repository detail window. Held in an
-/// ObservableObject because this environment cannot load the `@State` macro.
+/// Local UI state for one repository detail window. Owned by the window
+/// controller and shared with the view, so a reused window can apply a newly
+/// requested focus. Held in an ObservableObject because this environment
+/// cannot load the `@State` macro.
 @MainActor
 final class DetailViewState: ObservableObject {
     @Published var focus: String?
@@ -56,30 +92,19 @@ final class DetailViewState: ObservableObject {
 struct RepositoryDetailView: View {
     @ObservedObject var appState: AppState
     let repoPath: String
-    let focusWorktreePath: String?
+    @ObservedObject var state: DetailViewState
     let onOpenSettings: () -> Void
-    @StateObject private var state: DetailViewState
 
     private var snapshot: RepoSnapshot? {
         appState.snapshots.first { $0.config.path == repoPath }
     }
 
-    init(appState: AppState, repoPath: String, focusWorktreePath: String?,
+    init(appState: AppState, repoPath: String, state: DetailViewState,
          onOpenSettings: @escaping () -> Void) {
         self.appState = appState
         self.repoPath = repoPath
-        self.focusWorktreePath = focusWorktreePath
+        self.state = state
         self.onOpenSettings = onOpenSettings
-        // A focused clean worktree must be visible, so start expanded.
-        var startExpanded = false
-        if let focusWorktreePath,
-           let snapshot = appState.snapshots.first(where: { $0.config.path == repoPath }),
-           let worktree = snapshot.git.worktrees.first(where: { $0.path == focusWorktreePath }),
-           WorktreeOrdering.rank(worktree) == 2 {
-            startExpanded = true
-        }
-        self._state = StateObject(wrappedValue: DetailViewState(
-            focus: focusWorktreePath, showCleanWorktrees: startExpanded))
     }
 
     var body: some View {
