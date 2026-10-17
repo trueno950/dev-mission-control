@@ -23,6 +23,7 @@ final class AppState: ObservableObject {
     private let engramScanner: EngramScanner
     private var refreshTimer: Timer?
     private var refreshTask: Task<Void, Never>?
+    private var evaluationDate = Date()
 
     nonisolated static func makeDefaultStore() -> ConfigStore {
         let base: URL
@@ -56,8 +57,13 @@ final class AppState: ObservableObject {
     // MARK: - Derived values
 
     func items(for snapshot: RepoSnapshot) -> [AttentionItem] {
-        AttentionMath.classify(snapshot, now: Date(), calendar: .current,
+        AttentionMath.classify(snapshot, now: evaluationDate, calendar: .current,
                                thresholds: config)
+    }
+
+    var attentionSummary: AttentionSummary {
+        AttentionMath.summaryCounts(snapshots, now: evaluationDate,
+                                    calendar: .current, thresholds: config)
     }
 
     /// Repositories currently needing attention, ordered by severity of their
@@ -115,6 +121,7 @@ final class AppState: ObservableObject {
             snapshots.sort { $0.config.id < $1.config.id }
 
             await MainActor.run { [weak self] in
+                self?.evaluationDate = now
                 self?.snapshots = snapshots
                 self?.lastRefresh = Date()
                 self?.isRefreshing = false
@@ -151,5 +158,10 @@ final class AppState: ObservableObject {
 
     func removeRepo(id: String) {
         config.repos.removeAll { $0.id == id }
+    }
+
+    func setPaused(path: String, isPaused: Bool) {
+        guard let index = config.repos.firstIndex(where: { $0.path == path }) else { return }
+        config.repos[index].isPaused = isPaused
     }
 }

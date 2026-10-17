@@ -7,12 +7,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var panel: StatusPanel?
     private let settingsController = SettingsWindowController()
+    private lazy var detailController = RepositoryDetailWindowController()
     private lazy var appState = AppState()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let panel = StatusPanel(content: MissionControlPanelView(
             appState: appState,
             onOpenSettings: { [weak self] in self?.openSettings() },
+            onOpenDetail: { [weak self] repoPath, focusWorktreePath in
+                guard let self else { return }
+                self.detailController.show(
+                    appState: self.appState,
+                    repoPath: repoPath,
+                    focusWorktreePath: focusWorktreePath,
+                    onOpenSettings: { [weak self] in self?.openSettings() })
+            },
             onQuit: { NSApp.terminate(nil) }
         ))
         self.panel = panel
@@ -55,11 +64,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showContextMenu(for button: NSStatusBarButton) {
         let menu = NSMenu()
-        let settingsItem = menu.addItem(withTitle: "Settings…",
+        let settingsItem = menu.addItem(withTitle: "Ajustes…",
                                         action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit Dev Mission Control",
+        menu.addItem(withTitle: "Salir de Dev Mission Control",
                      action: #selector(NSApplication.terminate(_:)),
                      keyEquivalent: "q")
         statusItem?.menu = menu
@@ -107,13 +116,13 @@ private func runScanOnceAndExit() -> Never {
                                            thresholds: config)
 
         print("== \(repo.id) (\(repo.path))")
-        if let branch = git.branch { print("   branch: \(branch)") }
-        if !pr.available, let error = pr.error { print("   prs: unavailable (\(error))") }
+        if let branch = git.branch { print("   rama: \(branch)") }
+        if !pr.available, let error = pr.error { print("   prs: no disponible (\(error))") }
         if !activity.available, let error = activity.error {
-            print("   engram: unavailable (\(error))")
+            print("   engram: no disponible (\(error))")
         }
         if items.isEmpty {
-            print("   clean")
+            print("   sin hallazgos")
         } else {
             exitCode = 1
             for item in items {

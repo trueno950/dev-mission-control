@@ -12,7 +12,7 @@ final class SettingsWindowController {
         if window == nil {
             let hosting = NSHostingController(rootView: SettingsRootView(appState: appState))
             let newWindow = NSWindow(contentViewController: hosting)
-            newWindow.title = "Mission Control — Settings"
+            newWindow.title = "Mission Control — Ajustes"
             newWindow.styleMask = [.titled, .closable]
             newWindow.setContentSize(NSSize(width: 460, height: 560))
             newWindow.isReleasedWhenClosed = false
@@ -31,7 +31,7 @@ struct SettingsRootView: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                Section("Repositories") {
+                Section("Repositorios") {
                     ForEach(appState.config.repos) { repo in
                         HStack {
                             VStack(alignment: .leading, spacing: 1) {
@@ -43,19 +43,33 @@ struct SettingsRootView: View {
                                     .truncationMode(.middle)
                             }
                             Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(repo.isPaused ? "Pausado" : "Activo")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(repo.isPaused ? Color.orange : Color.green)
+                                Toggle("Pausar proyecto", isOn: Binding(
+                                    get: { repo.isPaused },
+                                    set: { appState.setPaused(path: repo.path, isPaused: $0) }
+                                ))
+                                .toggleStyle(.switch)
+                                .controlSize(.mini)
+                                .font(.caption2)
+                                .help("Pausa los avisos de inactividad y de worktrees limpios inactivos de este proyecto")
+                                .accessibilityLabel("Pausar \(repo.id)")
+                            }
                             Button(role: .destructive) {
                                 appState.removeRepo(id: repo.id)
                             } label: {
                                 Image(systemName: "minus.circle")
                             }
                             .buttonStyle(.borderless)
-                            .help("Remove repository")
+                            .help("Quitar repositorio")
                         }
                     }
                     Button {
                         addRepo()
                     } label: {
-                        Label("Add Repository…", systemImage: "plus")
+                        Label("Agregar repositorio…", systemImage: "plus")
                     }
                 }
 
@@ -71,37 +85,37 @@ struct SettingsRootView: View {
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                             } else {
-                                Text("No editor selected")
+                                Text("Sin editor seleccionado")
                                     .font(.callout)
                                     .foregroundStyle(.secondary)
                             }
                         }
                         Spacer()
-                        Button("Choose Editor…") { chooseEditor() }
+                        Button("Elegir editor…") { chooseEditor() }
                         if appState.config.editorApplicationPath != nil {
-                            Button("Clear") { appState.config.editorApplicationPath = nil }
+                            Button("Quitar") { appState.config.editorApplicationPath = nil }
                         }
                     }
-                    Text("The Editor action opens the selected worktree in this application.")
+                    Text("La acción Editor abre el worktree seleccionado en esta aplicación.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Scan") {
+                Section("Escaneo") {
                     Stepper(value: $appState.config.refreshIntervalMinutes, in: 1...60) {
-                        labeled("Refresh every", "\(appState.config.refreshIntervalMinutes) min")
+                        labeled("Escanear cada", "\(appState.config.refreshIntervalMinutes) min")
                     }
                 }
 
-                Section("Attention thresholds") {
+                Section("Umbrales de atención") {
                     Stepper(value: $appState.config.staleWorktreeDays, in: 1...90) {
-                        labeled("Worktree idle more than", "\(appState.config.staleWorktreeDays) days")
+                        labeled("Worktree inactivo más de", "\(appState.config.staleWorktreeDays) días")
                     }
                     Stepper(value: $appState.config.stalePRDays, in: 1...90) {
-                        labeled("PR open more than", "\(appState.config.stalePRDays) days")
+                        labeled("PR abierta más de", "\(appState.config.stalePRDays) días")
                     }
                     Stepper(value: $appState.config.inactivityDays, in: 1...180) {
-                        labeled("No agent activity for more than", "\(appState.config.inactivityDays) days")
+                        labeled("Sin actividad del agente más de", "\(appState.config.inactivityDays) días")
                     }
                 }
             }
@@ -109,7 +123,7 @@ struct SettingsRootView: View {
 
             HStack {
                 Spacer()
-                Text("\(appState.config.repos.count) repositories")
+                Text("\(appState.config.repos.count) repositorios")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
