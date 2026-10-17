@@ -483,6 +483,15 @@ func diffParserTests() {
 
     check(DiffParser.parse("").isEmpty, "empty diff parses to no lines")
     checkEqual(DiffParser.parse("+solo")[0].kind, DiffLineKind.addition, "bare addition without headers")
+
+    // MARK: Stable per-line identities for lazy rendering (escalated R3-001)
+
+    do {
+        let lines = DiffParser.parse(sample)
+        checkEqual(lines.map { $0.id }, Array(lines.indices), "ids are sequential from zero")
+        checkEqual(DiffParser.parse(sample).map { $0.id }, lines.map { $0.id },
+                   "re-parsing the same diff yields the same identities")
+    }
 }
 
 // Suites wired per task:

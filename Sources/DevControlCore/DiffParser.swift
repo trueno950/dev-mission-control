@@ -12,12 +12,15 @@ public enum DiffLineKind: Hashable, Sendable {
 }
 
 /// One parsed unified-diff line. `text` keeps its leading sign so the UI can
-/// render the raw diff content.
-public struct DiffLine: Hashable, Sendable {
+/// render the raw diff content, and `id` is a stable sequential identity so
+/// lazy stacks never reuse rows by offset.
+public struct DiffLine: Hashable, Sendable, Identifiable {
+    public let id: Int
     public let kind: DiffLineKind
     public let text: String
 
-    public init(kind: DiffLineKind, text: String) {
+    public init(id: Int, kind: DiffLineKind, text: String) {
+        self.id = id
         self.kind = kind
         self.text = text
     }
@@ -31,9 +34,10 @@ public enum DiffParser {
     public static func parse(_ diff: String) -> [DiffLine] {
         guard !diff.isEmpty else { return [] }
         return diff.split(separator: "\n", omittingEmptySubsequences: false)
-            .map { raw in
+            .enumerated()
+            .map { offset, raw in
                 let line = String(raw)
-                return DiffLine(kind: kind(of: line), text: line)
+                return DiffLine(id: offset, kind: kind(of: line), text: line)
             }
     }
 

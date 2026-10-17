@@ -754,7 +754,7 @@ private struct WorktreeDiffSheet: View {
             } else {
                 ScrollView([.horizontal, .vertical]) {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(DiffParser.parse(diff).enumerated()), id: \.offset) { _, line in
+                        ForEach(DiffParser.parse(diff)) { line in
                             Text(line.text)
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(color(for: line.kind))
