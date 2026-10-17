@@ -44,7 +44,7 @@ T5 [S2,S5,S6] Engram scanner (HTTP GET, per-project last activity) with response
 T6 [S1,S7,S4] Full panel UI (per-project cards, attention rows, clean state, config-error rows), settings window with folder picker, README, final functional verification (build, launch, manual smoke on real repos).
 T7 [S9,S13] Normalize Git status per checkout/worktree (staged, unstaged, untracked, conflicts) with parser tests — worker, done; commit: 8024cbe.
 T8 [S9,S13] Implement evidence-based attention classification and backward-compatible paused-project config; test pause suppression and non-urgent pending changes; document evidence rules — inline, done; commit: 90285b7.
-T9 [S3,S5,S6,S12,S13] Add source timestamps/freshness, bounded non-overlapping scans, and last-good stale retention without losing Git when remote sources fail; classify stale/unavailable reads as no information; document the source states — worker plus parent review, in progress; split into source freshness, attention classification, and subprocess-timeout commit slices; source slice: `d0ae1ea`; classification and timeout slices pending.
+T9 [S3,S5,S6,S12,S13] Add source timestamps/freshness, bounded non-overlapping scans, and last-good stale retention without losing Git when remote sources fail; classify stale/unavailable reads as no information; document the source states — worker plus parent review, done; source slice: `d0ae1ea`; classification slice: `d5f366e`; subprocess-timeout slice: `35dea99`; verified 267/267 logic checks and `swift build`.
 T10 [S11,S12,S13] Implement argument-safe worktree actions and verified worktree-to-PR mapping; test paths containing spaces and keep all operations read-only — inline; commit: pending.
 T11 [S10,S12,S13] Implement compact expandable repository cards, accurate project/notice counts, per-source freshness, pause controls, README updates, and end-to-end acceptance checks — inline; commit: pending.
 
@@ -163,3 +163,9 @@ L10 (route): T9 uses the worker route for its bounded connector/AppState reliabi
 L11 (spec clarification from the original request): “Sin información: integración ausente, error o datos desactualizados.” Only current source data may create findings; stale and unavailable values remain distinguishable from clean results, while other current sources continue independently.
 
 L12 (T9 slice boundary): Source freshness and last-good retention committed as `d0ae1ea` (`feat(data): retain source freshness across scan failures`), 371 diff lines. Remaining T9 commits are limited to attention classification and process deadlines.
+
+L13 (T9 slice boundary): Current-only finding classification committed as `d5f366e` (`fix(attention): ignore stale source evidence`), 161 diff lines. The remaining T9 slice is subprocess deadline enforcement and its tests.
+
+L14 (T9 slice boundary): Subprocess deadline enforcement and its regression tests were committed as `35dea99` (`fix(process): enforce deadlines on process exit`), 237 diff lines; this slice is confined to `ProcessRunner`, the process test suite, and its test entry point.
+
+L15 (T9 completion): Verified `swift run DevControlLogicTests` (267/267), `swift build`, and `git diff --check`. Current source reads alone create findings; stale values remain available with their original read time and current failure; subprocess deadlines follow process exit rather than pipe EOF.
