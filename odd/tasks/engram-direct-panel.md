@@ -28,7 +28,9 @@ Stacked PR chain against the verified default branch (`main`), sliced by layer, 
 - Slice B (T17–T20 panel UI): the Engram panel window, search, retake-context copy, and sessions browsing. Cumulative at T19: 5 commits, 2,008 authored lines since `origin/main`; the slice boundary is recorded here, and the chain will be cut as PR A = T16 core, PR B = T17–T20 panel UI, PR C = T21 docs/preview before any push. Boundary: T17 landed as commit `b9b85aa` at 546 authored lines — above the ~400-per-commit guideline — so the reminder fired once here; T18–T20 continue this same slice and each stays small.
 - Slice C (T21): README, preview build, and acceptance checks.
 
-Each PR is opened against its parent slice and retargeted to `main` immediately before its own merge, as in the previous delivery. Native review, when due, runs on the committed slice candidate with the lenses that match that slice.
+Each PR is opened against its parent slice and retargeted to `main` immediately before its own merge, as in the previous delivery.
+
+Opened chain (2026-10-17, after the owner chose "Pushear y abrir la cadena de PRs"): PR #4 `main` ← `feat/engram-panel-core` @ `ad61756` (+1,003/−0); PR #5 ← `feat/engram-panel-ui` @ `a3ac5f9` (+1,084/−40); PR #6 ← `feat/engram-panel-docs` @ `7661cc6` (docs). Each child is retargeted to `main` immediately before its own merge; merge SHAs are recorded here when they land. Native review, when due, runs on the committed slice candidate with the lenses that match that slice.
 
 ## Tasks
 
