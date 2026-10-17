@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: StatusPanel?
     private let settingsController = SettingsWindowController()
     private lazy var detailController = RepositoryDetailWindowController()
+    private lazy var engramPanelController = EngramPanelWindowController()
     private lazy var appState = AppState()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -20,7 +21,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     appState: self.appState,
                     repoPath: repoPath,
                     focusWorktreePath: focusWorktreePath,
-                    onOpenSettings: { [weak self] in self?.openSettings() })
+                    onOpenSettings: { [weak self] in self?.openSettings() },
+                    onOpenEngramPanel: { [weak self] in
+                        guard let self else { return }
+                        self.engramPanelController.show(appState: self.appState,
+                                                        repoPath: repoPath)
+                    })
+            },
+            onOpenEngramPanel: { [weak self] repoPath in
+                guard let self else { return }
+                self.engramPanelController.show(appState: self.appState, repoPath: repoPath)
             },
             onQuit: { NSApp.terminate(nil) }
         ))
