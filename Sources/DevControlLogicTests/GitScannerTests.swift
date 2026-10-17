@@ -260,6 +260,7 @@ func gitScannerTests() {
         checkEqual(status.worktrees.count, 2, "both linked worktrees scanned")
         if status.worktrees.count >= 2 {
             checkEqual(status.worktrees[0].name, "final-127", "worktree name from path")
+            checkEqual(status.worktrees[0].headCommit, "def", "worktree keeps its exact HEAD object ID")
             checkEqual(status.worktrees[0].branch, nil, "detached worktree branch remains nil")
             check(!status.worktrees[0].isDirty, "clean worktree not dirty")
             checkEqual(status.worktrees[0].dirtyCount, 0, "clean worktree has zero changed files")
@@ -270,6 +271,7 @@ func gitScannerTests() {
             check(status.worktrees[1].isDirty, "dirty worktree detected per worktree")
             checkEqual(status.worktrees[1].dirtyCount, 3, "dirty worktree reports changed file count")
             checkEqual(status.worktrees[1].branch, "feature/fix-131", "worktree branch parsed")
+            checkEqual(status.worktrees[1].headCommit, "999", "branch worktree keeps its exact HEAD")
             checkEqual(status.worktrees[1].ageDays, 1, "recent worktree age")
         }
     }

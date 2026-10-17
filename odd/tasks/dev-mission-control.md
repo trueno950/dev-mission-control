@@ -24,7 +24,7 @@ S9: The user requested these exact status rules: “En curso: cambios locales re
 
 S10: The requested compact card includes the repository name, primary checkout branch, number of worktrees, primary reason, expandable per-worktree branch/path, separate staged/unstaged/untracked counts, distinct affected-project and notice counts, and last-read time plus source. The primary checkout branch must not be confused with linked-worktree branches.
 
-S11: The requested actions open the selected worktree in an editor, terminal, or folder; display its diff; and open a PR only when the worktree branch-to-PR association is verified. No commit, push, merge, or worktree deletion is automatic. Actions must target the selected worktree even when its path contains spaces.
+S11: The requested actions open the selected worktree in an editor configurable in Mission Control, a terminal, or a folder; display its diff; and open a PR only when the worktree branch-to-PR association is verified. For PR association, require one current PR whose `headRefName` and `headRefOid` exactly match the worktree branch and HEAD commit, and open only its returned HTTPS `url`; branch-name-only matches are insufficient. No commit, push, merge, or worktree deletion is automatic. Actions must target the selected worktree even when its path contains spaces.
 
 S12: The requested robustness rules separate connectors, normalized data, attention rules, and UI; prevent overlapping scans and UI blocking; bound external operations; preserve last valid data as stale after a refresh error; keep local Git available when another integration fails; avoid model calls in periodic scans; and pass process arguments separately without putting paths into shell command strings. A GitHub error is not an empty PR list.
 
@@ -45,7 +45,7 @@ T6 [S1,S7,S4] Full panel UI (per-project cards, attention rows, clean state, con
 T7 [S9,S13] Normalize Git status per checkout/worktree (staged, unstaged, untracked, conflicts) with parser tests — worker, done; commit: 8024cbe.
 T8 [S9,S13] Implement evidence-based attention classification and backward-compatible paused-project config; test pause suppression and non-urgent pending changes; document evidence rules — inline, done; commit: 90285b7.
 T9 [S3,S5,S6,S12,S13] Add source timestamps/freshness, bounded non-overlapping scans, and last-good stale retention without losing Git when remote sources fail; classify stale/unavailable reads as no information; document the source states — worker plus parent review, done; source slice: `d0ae1ea`; classification slice: `d5f366e`; subprocess-timeout slice: `35dea99`; verified 267/267 logic checks and `swift build`.
-T10 [S11,S12,S13] Implement argument-safe worktree actions and verified worktree-to-PR mapping; test paths containing spaces and keep all operations read-only — inline; commit: pending.
+T10 [S11,S12,S13] Implement a user-configurable editor target, argument-safe worktree actions, and verified worktree-to-PR mapping; test paths containing spaces and keep all operations read-only — inline, blocked pending owner decision on differential proof; commit: pending.
 T11 [S10,S12,S13] Implement compact expandable repository cards, accurate project/notice counts, per-source freshness, pause controls, README updates, and end-to-end acceptance checks — inline; commit: pending.
 
 ## Log
@@ -169,3 +169,13 @@ L13 (T9 slice boundary): Current-only finding classification committed as `d5f36
 L14 (T9 slice boundary): Subprocess deadline enforcement and its regression tests were committed as `35dea99` (`fix(process): enforce deadlines on process exit`), 237 diff lines; this slice is confined to `ProcessRunner`, the process test suite, and its test entry point.
 
 L15 (T9 completion): Verified `swift run DevControlLogicTests` (267/267), `swift build`, and `git diff --check`. Current source reads alone create findings; stale values remain available with their original read time and current failure; subprocess deadlines follow process exit rather than pipe EOF.
+
+L16 (T10 editor decision): User selected “Configurable en Mission Control” for the Editor action.
+
+L17 (T10 interface evidence and decision): The installed `gh pr list --help` lists JSON fields `headRefName`, `headRefOid`, and `url`; `/usr/bin/open` usage supports `-a` (application), `-b` (bundle identifier), and file arguments. PR links will require one exact branch-and-HEAD match and a returned HTTPS URL; all selected paths remain separate process arguments.
+
+L18 (T10 verification blocker): The base-versus-candidate `--scan-once` comparison for a config containing `editorApplicationPath` exceeded its 30-second command timeout while building the scratch baseline. Per timeout policy it was not retried or moved to background; the owner must decide whether to accept this missing comparison or authorize a different bounded proof.
+
+L19 (T10 verification results): The focused logic suite passed 291/291 checks, `swift build` passed after replacing the unavailable SwiftUI `@State` macro with `@StateObject`, and `git diff --check` passed. The T10 implementation diff was reviewed; its required differential proof remains unresolved.
+
+L20 (T10 delivery instruction): User requested “haz coomit y push”. Commit and push are explicitly authorized while the differential proof remains unresolved; this does not change T10's verification status.

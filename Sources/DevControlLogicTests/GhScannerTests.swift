@@ -30,7 +30,9 @@ func ghScannerTests() {
         let json = """
         [
           {"number": 142, "title": "Fix webhook", "createdAt": "2026-10-02T10:00:00Z",
-           "statusCheckRollup": [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "FAILURE"}]},
+           "statusCheckRollup": [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "FAILURE"}],
+           "headRefName": "feature/fix-webhook", "headRefOid": "abc123",
+           "url": "https://github.com/acme/demo/pull/142"},
           {"number": 141, "title": "Copy fix", "createdAt": "2026-10-14T10:00:00Z",
            "statusCheckRollup": [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"}]},
           {"number": 140, "title": "Vercel failing", "createdAt": "2026-10-05T10:00:00Z",
@@ -44,6 +46,9 @@ func ghScannerTests() {
         checkEqual(prs[0].number, 142, "PR number preserved")
         checkEqual(prs[0].ageDays, 14, "PR age from createdAt")
         check(prs[0].ciFailing, "CheckRun FAILURE conclusion marks CI failing")
+        checkEqual(prs[0].headRefName, "feature/fix-webhook", "PR head branch parsed")
+        checkEqual(prs[0].headRefOid, "abc123", "PR head commit parsed")
+        checkEqual(prs[0].url, "https://github.com/acme/demo/pull/142", "PR URL parsed")
         check(!prs[1].ciFailing, "SUCCESS conclusion not failing")
         check(prs[2].ciFailing, "StatusContext FAILURE state marks CI failing")
         check(!prs[3].ciFailing, "empty rollup not failing")
@@ -64,7 +69,9 @@ func ghScannerTests() {
         // Happy path: origin remote + pr list.
         let prJSON = """
         [{"number": 7, "title": "Add feature", "createdAt": "2026-10-01T10:00:00Z",
-          "statusCheckRollup": [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "FAILURE"}]}]
+          "statusCheckRollup": [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "FAILURE"}],
+          "headRefName": "feature/add", "headRefOid": "def456",
+          "url": "https://github.com/acme/demo/pull/7"}]
         """
         let runner = FakeRunner(outputs: [
             (("/usr/bin/git", ["-C", "/repos/demo", "remote"]), .success("git@github.com:acme/demo.git\n")),
@@ -77,6 +84,10 @@ func ghScannerTests() {
         checkEqual(status.prs.count, 1, "one PR parsed by scanner")
         checkEqual(status.prs[0].number, 7, "scanner PR number")
         check(status.prs[0].ciFailing, "scanner marks failing CI")
+        checkEqual(status.prs[0].headRefName, "feature/add", "scanner retains PR head branch")
+        checkEqual(status.prs[0].headRefOid, "def456", "scanner retains PR head commit")
+        checkEqual(status.prs[0].url, "https://github.com/acme/demo/pull/7",
+                   "scanner retains returned HTTPS URL")
         check(status.error == nil, "no error on happy path")
     }
 
@@ -124,6 +135,28 @@ func ghScannerTests() {
                                   now: now, calendar: cal)
         check(!status.available, "missing path is unavailable")
         check(status.error == nil, "missing path is quiet for gh")
+    }
+
+    // MARK: - T10 PR association fields
+
+    do {
+        let recording = RecordingRunner { command, _ in
+            command == "/opt/homebrew/bin/gh"
+                ? .success("[]")
+                : .failure(ScannerError.commandFailed(command, 1, "unexpected command"))
+        }
+        let scanner = GhScanner(runner: recording, pathExists: { _ in true })
+        _ = scanner.scan(repoPath: "/repos/demo", slugOverride: "acme/demo",
+                         now: now, calendar: cal)
+        let arguments = recording.calls.first(where: {
+            $0.command == "/opt/homebrew/bin/gh"
+        })?.arguments ?? []
+        let jsonIndex = arguments.firstIndex(of: "--json")
+        check(jsonIndex != nil, "gh PR command requests structured output")
+        let fields = jsonIndex.map { arguments[$0 + 1] }
+        checkEqual(fields,
+                   "number,title,createdAt,statusCheckRollup,headRefName,headRefOid,url",
+                   "gh PR command requests verified branch, HEAD, and URL fields")
     }
 
     // MARK: - T9 source freshness and stale retention

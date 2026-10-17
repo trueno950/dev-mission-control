@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import DevControlCore
 
@@ -167,7 +168,10 @@ struct ProjectCard: View {
         if item.kind == .staleWorktree,
            let path = item.worktreePath,
            let worktree = snapshot.git.worktrees.first(where: { $0.path == path }) {
-            WorktreeTriageRow(worktree: worktree, severity: item.severity)
+            WorktreeTriageRow(
+                worktree: worktree, severity: item.severity,
+                editorApplicationPath: appState.config.editorApplicationPath,
+                pullRequest: snapshot.associatedPullRequest(for: worktree))
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Circle()
@@ -206,11 +210,22 @@ struct ProjectCard: View {
     }
 }
 
-/// Compact row for a repository with nothing to flag.
+/// Local UI state for one worktree's asynchronous actions.
+@MainActor
+private final class WorktreeActionState: ObservableObject {
+    @Published var isLoadingDiff = false
+    @Published var showingDiff = false
+    @Published var diffText = ""
+    @Published var actionError: String?
+}
+
 /// Detailed, read-only triage row for a linked worktree.
 struct WorktreeTriageRow: View {
     let worktree: WorktreeInfo
     let severity: AttentionItem.Severity
+    let editorApplicationPath: String?
+    let pullRequest: PRInfo?
+    @StateObject private var actionState = WorktreeActionState()
 
     var body: some View {
         HStack(alignment: .center, spacing: 7) {
@@ -237,23 +252,64 @@ struct WorktreeTriageRow: View {
                     .textSelection(.enabled)
             }
             Spacer(minLength: 2)
-            Button(action: revealInFinder) {
-                Image(systemName: "folder")
-            }
-            .buttonStyle(.borderless)
-            .controlSize(.small)
-            .help("Reveal in Finder")
-            .accessibilityLabel("Reveal \(worktree.name) in Finder")
+            Menu {
+                Button {
+                    openEditor()
+                } label: {
+                    Label("Open in Editor", systemImage: "square.and.pencil")
+                }
+                .disabled(editorApplicationPath == nil)
 
-            Button(action: copyPath) {
-                Image(systemName: "doc.on.doc")
+                Button {
+                    openTerminal()
+                } label: {
+                    Label("Open in Terminal", systemImage: "terminal")
+                }
+
+                Button {
+                    showDiff()
+                } label: {
+                    Label(actionState.isLoadingDiff ? "Preparing Diff…" : "Show Diff",
+                          systemImage: "doc.text.magnifyingglass")
+                }
+                .disabled(actionState.isLoadingDiff)
+
+                if let pullRequest {
+                    Button {
+                        openPullRequest(pullRequest)
+                    } label: {
+                        Label("Open PR #\(pullRequest.number)",
+                              systemImage: "arrow.up.right.square")
+                    }
+                }
+
+                Divider()
+                Button(action: revealInFinder) {
+                    Label("Reveal in Finder", systemImage: "folder")
+                }
+                Button(action: copyPath) {
+                    Label("Copy Path", systemImage: "doc.on.doc")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
             }
             .buttonStyle(.borderless)
             .controlSize(.small)
-            .help("Copy worktree path")
-            .accessibilityLabel("Copy path for \(worktree.name)")
+            .help("Actions for \(worktree.name)")
+            .accessibilityLabel("Actions for \(worktree.name)")
         }
         .padding(.vertical, 3)
+        .sheet(isPresented: $actionState.showingDiff) {
+            WorktreeDiffSheet(worktreeName: worktree.name, diff: actionState.diffText)
+        }
+        .alert("Worktree Action Failed", isPresented: Binding(
+            get: { actionState.actionError != nil },
+            set: { if !$0 { actionState.actionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionState.actionError = nil }
+        } message: {
+            Text(actionState.actionError ?? "Unknown error")
+        }
     }
 
     private var statusSummary: String {
@@ -280,6 +336,64 @@ struct WorktreeTriageRow: View {
         }
     }
 
+    private func openEditor() {
+        guard let editorApplicationPath else {
+            actionState.actionError = "Choose an editor in Settings first."
+            return
+        }
+        launch(WorktreeActionCommand.openApplication(
+            appPath: editorApplicationPath, worktreePath: worktree.path))
+    }
+
+    private func openTerminal() {
+        launch(WorktreeActionCommand.openTerminal(worktreePath: worktree.path))
+    }
+
+    private func launch(_ command: WorktreeActionCommand) {
+        Task { @MainActor in
+            let error = await Task.detached(priority: .userInitiated) { () -> String? in
+                do {
+                    _ = try ProcessRunner().run(command.executable, command.arguments, in: nil)
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            }.value
+            if let error { actionState.actionError = error }
+        }
+    }
+
+    private func showDiff() {
+        actionState.isLoadingDiff = true
+        let command = WorktreeActionCommand.gitDiff(worktreePath: worktree.path)
+        Task { @MainActor in
+            let result = await Task.detached(priority: .userInitiated) { () -> (String?, String?) in
+                do {
+                    return (try ProcessRunner().run(command.executable, command.arguments, in: nil), nil)
+                } catch {
+                    return (nil, error.localizedDescription)
+                }
+            }.value
+            actionState.isLoadingDiff = false
+            if let error = result.1 {
+                actionState.actionError = error
+            } else {
+                actionState.diffText = result.0 ?? ""
+                actionState.showingDiff = true
+            }
+        }
+    }
+
+    private func openPullRequest(_ pullRequest: PRInfo) {
+        guard let url = pullRequest.webURL else {
+            actionState.actionError = "This pull request has no safe HTTPS URL."
+            return
+        }
+        if !NSWorkspace.shared.open(url) {
+            actionState.actionError = "Could not open pull request #\(pullRequest.number)."
+        }
+    }
+
     private func revealInFinder() {
         NSWorkspace.shared.activateFileViewerSelecting([
             URL(fileURLWithPath: worktree.path, isDirectory: true)
@@ -289,6 +403,39 @@ struct WorktreeTriageRow: View {
     private func copyPath() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(worktree.path, forType: .string)
+    }
+}
+
+private struct WorktreeDiffSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let worktreeName: String
+    let diff: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Diff · \(worktreeName)")
+                    .font(.headline)
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            Divider()
+            if diff.isEmpty {
+                Text("No tracked changes relative to HEAD. Untracked files are not included.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else {
+                ScrollView([.horizontal, .vertical]) {
+                    Text(diff)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 620, minHeight: 420)
     }
 }
 

@@ -361,6 +361,7 @@ gitScannerTests()
 ghScannerTests()
 engramScannerTests()
 processRunnerTests()
+worktreeActionTests()
 // ghScannerTests()    // T4
 // engramScannerTests() // T5
 
