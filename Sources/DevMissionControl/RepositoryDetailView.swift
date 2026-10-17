@@ -113,9 +113,9 @@ struct RepositoryDetailView: View {
                 detail(snapshot)
             } else {
                 VStack(spacing: 8) {
-                    Text("Sin datos para este proyecto.")
+                    Text(L10n.t("Sin datos para este proyecto.", "No data for this project."))
                         .font(.headline)
-                    Text("Cerrá esta ventana y volvé a abrirla desde el panel.")
+                    Text(L10n.t("Cerrá esta ventana y volvé a abrirla desde el panel.", "Close this window and reopen it from the panel."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -159,7 +159,7 @@ struct RepositoryDetailView: View {
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if snapshot.config.isPaused {
-                    Label("Pausado", systemImage: "pause.fill")
+                    Label(L10n.t("Pausado", "Paused"), systemImage: "pause.fill")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
@@ -168,7 +168,7 @@ struct RepositoryDetailView: View {
                 }
             }
             HStack(spacing: 6) {
-                Text("Principal ·")
+                Text(L10n.t("Principal ·", "Primary ·"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(primaryBranchLabel(snapshot))
@@ -193,7 +193,7 @@ struct RepositoryDetailView: View {
         let items = appState.items(for: snapshot)
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Hallazgos actuales")
+                Text(L10n.t("Hallazgos actuales", "Current findings"))
                     .font(.caption.weight(.semibold))
                 ForEach(items) { item in
                     Button {
@@ -232,13 +232,13 @@ struct RepositoryDetailView: View {
 
     private func checkoutSection(_ snapshot: RepoSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("Checkout principal · \(primaryBranchLabel(snapshot))")
+            Text(L10n.t("Checkout principal · \(primaryBranchLabel(snapshot))", "Primary checkout · \(primaryBranchLabel(snapshot))"))
                 .font(.caption.weight(.semibold))
             Text(changeSummary(snapshot.git.changes))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             if snapshot.git.unpushedCount > 0 {
-                Text("\(snapshot.git.unpushedCount) commit\(snapshot.git.unpushedCount == 1 ? "" : "s") sin subir")
+                Text(L10n.t("\(snapshot.git.unpushedCount) commit\(snapshot.git.unpushedCount == 1 ? "" : "s") sin subir", "\(snapshot.git.unpushedCount) unpushed commit\(snapshot.git.unpushedCount == 1 ? "" : "s")"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -259,15 +259,15 @@ struct RepositoryDetailView: View {
 
         VStack(alignment: .leading, spacing: 4) {
             if snapshot.git.freshness == .unavailable {
-                Text("Worktrees no disponibles")
+                Text(L10n.t("Worktrees no disponibles", "Worktrees unavailable"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if all.isEmpty {
-                Text("Sin worktrees adicionales")
+                Text(L10n.t("Sin worktrees adicionales", "No additional worktrees"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("Worktrees")
+                Text(L10n.t("Worktrees", "Worktrees"))
                     .font(.caption.weight(.semibold))
                 ForEach(active, id: \.path) { worktree in
                     triageRow(worktree, items: items)
@@ -281,7 +281,9 @@ struct RepositoryDetailView: View {
                             }
                         },
                         label: {
-                            Text("\(state.showCleanWorktrees ? "Ocultar" : "Ver") \(clean.count) worktree\(clean.count == 1 ? "" : "s") limpio\(clean.count == 1 ? "" : "s")")
+                            Text(state.showCleanWorktrees
+                                ? L10n.t("Ocultar \(clean.count) worktree\(clean.count == 1 ? "" : "s") limpio\(clean.count == 1 ? "" : "s")", "Hide \(clean.count) clean worktree\(clean.count == 1 ? "" : "s")")
+                                : L10n.t("Ver \(clean.count) worktree\(clean.count == 1 ? "" : "s") limpio\(clean.count == 1 ? "" : "s")", "Show \(clean.count) clean worktree\(clean.count == 1 ? "" : "s")"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         })
@@ -328,7 +330,7 @@ struct RepositoryDetailView: View {
 
     private func primaryBranchLabel(_ snapshot: RepoSnapshot) -> String {
         if let branch = snapshot.git.branch { return branch }
-        return snapshot.git.freshness == .unavailable ? "no disponible" : "detached"
+        return snapshot.git.freshness == .unavailable ? L10n.t("no disponible", "unavailable") : "detached"
     }
 
     private func changeSummary(_ changes: ChangeCounts) -> String {
@@ -338,7 +340,7 @@ struct RepositoryDetailView: View {
             "Untracked \(changes.untracked)"
         ]
         if changes.conflicts > 0 {
-            parts.append("Conflictos \(changes.conflicts)")
+            parts.append("\(L10n.t("Conflictos", "Conflicts")) \(changes.conflicts)")
         }
         return parts.joined(separator: " · ")
     }

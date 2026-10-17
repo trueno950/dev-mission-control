@@ -64,11 +64,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showContextMenu(for button: NSStatusBarButton) {
         let menu = NSMenu()
-        let settingsItem = menu.addItem(withTitle: "Ajustes…",
+        let settingsItem = menu.addItem(withTitle: L10n.t("Ajustes…", "Settings…"),
                                         action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Salir de Dev Mission Control",
+        menu.addItem(withTitle: L10n.t("Salir de Dev Mission Control", "Quit Dev Mission Control"),
                      action: #selector(NSApplication.terminate(_:)),
                      keyEquivalent: "q")
         statusItem?.menu = menu
@@ -116,13 +116,13 @@ private func runScanOnceAndExit() -> Never {
                                            thresholds: config)
 
         print("== \(repo.id) (\(repo.path))")
-        if let branch = git.branch { print("   branch: \(branch)") }
-        if !pr.available, let error = pr.error { print("   prs: unavailable (\(error))") }
+        if let branch = git.branch { print("   \(L10n.t("branch:", "rama:")) \(branch)") }
+        if !pr.available, let error = pr.error { print("   prs: \(L10n.t("unavailable", "no disponible")) (\(error))") }
         if !activity.available, let error = activity.error {
-            print("   engram: unavailable (\(error))")
+            print("   engram: \(L10n.t("unavailable", "no disponible")) (\(error))")
         }
         if items.isEmpty {
-            print("   clean")
+            print("   \(L10n.t("clean", "sin hallazgos"))")
         } else {
             exitCode = 1
             for item in items {
