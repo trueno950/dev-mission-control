@@ -35,17 +35,23 @@ final class EngramPanelWindowController {
     private var states: [String: EngramPanelState] = [:]
 
     func show(appState: AppState, repoPath: String) {
+        let snapshot = appState.snapshots.first { $0.config.path == repoPath }
         let state: EngramPanelState
         if let existing = states[repoPath] {
             state = existing
         } else {
-            let snapshot = appState.snapshots.first { $0.config.path == repoPath }
             let name = snapshot?.config.id ?? (repoPath as NSString).lastPathComponent
             state = EngramPanelState(repoPath: repoPath,
                                      repoName: name,
                                      configuredEngramProject: snapshot?.config.engramProject)
             states[repoPath] = state
         }
+        // Set on every presentation: a reused window must compose its retake
+        // context from the app's current Git read, and a repository with no
+        // snapshot is presented as an unread Git source, never as zeros (S5).
+        state.gitStatus = snapshot?.git ?? GitStatus(
+            error: L10n.t("No hay estado de Git para este repositorio.",
+                          "No Git status for this repository."))
 
         let window: NSWindow
         if let existing = windows[repoPath] {
@@ -109,6 +115,20 @@ final class EngramPanelState: ObservableObject {
     @Published var selectedMemoryID: Int?
     @Published var tuiError: String?
 
+    /// Engram retake context read for this repository (`GET /context`), the
+    /// source of the "copy retake context" action. Kept apart from the other
+    /// sources so it has its own freshness line (S5).
+    @Published private(set) var contextRead: EngramRead<String>?
+    /// Current Git state of the repository, set by
+    /// `EngramPanelWindowController.show` on every presentation so the copied
+    /// retake context carries the app's real Git read. Until then it is an
+    /// unread status, never a zero-filled success (S5).
+    @Published var gitStatus = GitStatus(
+        error: L10n.t("Sin lectura de Git para este repositorio.",
+                      "No Git read for this repository."))
+    /// Transient "Copied" confirmation, cleared shortly after the copy.
+    @Published private(set) var copyConfirmation: String?
+
     /// Both memory lists read the same number of rows.
     private static let memoriesLimit = 20
     /// Idle wait before a search is issued while the user types.
@@ -124,6 +144,8 @@ final class EngramPanelState: ObservableObject {
     private var issuedSearchQuery: String?
     /// Pending idle-debounce task; cancelled by the next keystroke or submit.
     private var searchDebounceTask: Task<Void, Never>?
+    /// Pending "Copied" confirmation reset, cancelled by a newer copy.
+    private var copyConfirmationTask: Task<Void, Never>?
 
     init(repoPath: String, repoName: String, configuredEngramProject: String?,
          client: EngramPanelClient = EngramPanelClient()) {
@@ -179,10 +201,11 @@ final class EngramPanelState: ObservableObject {
     /// results shown; an empty query leaves the panel exactly as it was.
     var isSearchActive: Bool { !normalizedSearchQuery.isEmpty }
 
-    /// Project the search runs against (S4): the one `load()` resolved when it
-    /// already ran, otherwise the same resolver applied to the last
-    /// `/projects` read, so no project name is invented here.
-    private var searchProject: String {
+    /// Project every read that needs one runs against (S4): the one `load()`
+    /// resolved when it already ran, otherwise the same resolver applied to the
+    /// last `/projects` read, so no project name is invented here. Used by the
+    /// search and by the retake-context read.
+    private var resolvedProject: String {
         if let projectName { return projectName }
         return EngramProjectResolver.resolve(
             repoPath: repoPath,
@@ -202,7 +225,7 @@ final class EngramPanelState: ObservableObject {
         }
         issuedSearchQuery = query
         isSearching = true
-        let read = await client.search(query: query, project: searchProject,
+        let read = await client.search(query: query, project: resolvedProject,
                                        limit: Self.memoriesLimit)
         // Out-of-order guard: the query changed or was cleared while this
         // request was in flight, so its reply is discarded (and its spinner is
@@ -247,6 +270,34 @@ final class EngramPanelState: ObservableObject {
         issuedSearchQuery = nil
         isSearching = false
         searchRead = nil
+    }
+
+    // MARK: - Retake context (S2)
+
+    /// Reads `/context` and copies the composed retake block to the pasteboard.
+    /// The text only ever comes from `RetakeContext.compose`; the panel supplies
+    /// values (repository name and path, resolved Engram project, active app
+    /// language, current Git read). The read keeps its own freshness, and when
+    /// it fails the action stays usable: the composed block then states there is
+    /// no information instead of fabricating a memory (S5). Nothing is written
+    /// to Engram.
+    func copyRetakeContext() async {
+        let newContext = await client.context(project: resolvedProject)
+        let applied = newContext.retainingLastRead(contextRead)
+        contextRead = applied
+        let composed = RetakeContext.compose(
+            repoName: repoName, repoPath: repoPath, git: gitStatus,
+            engramProject: resolvedProject, context: applied,
+            language: L10n.lang, now: Date())
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(composed, forType: .string)
+        copyConfirmation = L10n.t("Copiado", "Copied")
+        copyConfirmationTask?.cancel()
+        copyConfirmationTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.copyConfirmation = nil
+        }
     }
 }
 
@@ -344,6 +395,13 @@ struct EngramPanelView: View {
             freshnessLine(L10n.t("Proyecto", "Project"), read: state.projectsRead)
             freshnessLine(L10n.t("Contadores", "Counters"), read: state.statsRead)
             freshnessLine(L10n.t("Memorias", "Memories"), read: state.memoriesRead)
+            // Git feeds the retake context, so it is a source of its own (S5).
+            gitFreshnessLine
+            // The retake context is a source of its own too, so it gets its own
+            // line once it was read; its failure stays visible here (S5).
+            if let contextRead = state.contextRead {
+                freshnessLine(L10n.t("Contexto", "Context"), read: contextRead)
+            }
             // The search is a source of its own, so it gets its own line with
             // its read time and current failure. It only exists once a query
             // was searched, so an empty query keeps this list as it was.
@@ -394,13 +452,28 @@ struct EngramPanelView: View {
         .onChange(of: state.searchQuery) { _ in state.searchQueryDidChange() }
     }
 
-    /// One freshness line per source with its read time (S5). A stale value
-    /// keeps its read time and still shows the current failure.
+    /// One freshness line per source with its read time (S5).
     private func freshnessLine<Value: Hashable & Sendable>(
         _ name: String, read: EngramRead<Value>?
     ) -> some View {
-        let freshness = read?.freshness ?? .unavailable
-        return HStack(alignment: .top, spacing: 6) {
+        freshnessRow(name, freshness: read?.freshness ?? .unavailable,
+                     lastReadAt: read?.lastReadAt, error: read?.error)
+    }
+
+    /// Freshness of the Git read the retake-context action uses (S5). Git is not
+    /// an Engram source, so it renders through the same row shape with its own
+    /// values instead of an `EngramRead`.
+    private var gitFreshnessLine: some View {
+        freshnessRow(L10n.t("Git", "Git"), freshness: state.gitStatus.freshness,
+                     lastReadAt: state.gitStatus.lastReadAt,
+                     error: state.gitStatus.error)
+    }
+
+    /// One freshness row with its read time and current failure (S5). A stale
+    /// value keeps its read time and still shows the current failure.
+    private func freshnessRow(_ name: String, freshness: SourceFreshness,
+                              lastReadAt: Date?, error: String?) -> some View {
+        HStack(alignment: .top, spacing: 6) {
             Circle()
                 .fill(statusColor(freshness))
                 .frame(width: 5, height: 5)
@@ -409,11 +482,11 @@ struct EngramPanelView: View {
                 .font(.system(size: 10, weight: .semibold))
                 .frame(width: 78, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
-                Text("\(stateText(freshness)) · \(readTimeText(read?.lastReadAt))")
+                Text("\(stateText(freshness)) · \(readTimeText(lastReadAt))")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if let error = read?.error {
+                if let error {
                     Text(error)
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
@@ -622,6 +695,7 @@ struct EngramPanelView: View {
             Text(L10n.t("Solo lectura · Engram", "Read-only · Engram"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            retakeContextButton
             Spacer()
             Button {
                 openTUI()
@@ -638,6 +712,27 @@ struct EngramPanelView: View {
     }
 
     // MARK: - Helpers
+
+    /// Copy action for the retake block (S2). The view only triggers the read
+    /// and copy in the state, which composes the text through
+    /// `RetakeContext.compose`; the transient confirmation is shown here.
+    @ViewBuilder private var retakeContextButton: some View {
+        Button {
+            Task { await state.copyRetakeContext() }
+        } label: {
+            Label(L10n.t("Copiar contexto para retomar", "Copy retake context"),
+                  systemImage: "doc.on.doc")
+        }
+        .controlSize(.small)
+        .help(L10n.t("Lee /context de Engram y copia el bloque para retomar con el estado actual de Git. No escribe en Engram.",
+                     "Reads Engram /context and copies the retake block with the current Git state. Writes nothing to Engram."))
+        .accessibilityLabel(L10n.t("Copiar contexto para retomar", "Copy retake context"))
+        if let confirmation = state.copyConfirmation {
+            Text(confirmation)
+                .font(.caption2)
+                .foregroundStyle(.green)
+        }
+    }
 
     private func openTUI() {
         Task { @MainActor in

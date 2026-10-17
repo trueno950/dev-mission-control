@@ -94,13 +94,24 @@ public enum RetakeContext {
         lines.append("\(language.pick(es: "Generado", en: "Generated")): \(timestamp(now))")
         lines.append("")
         lines.append("## \(language.pick(es: "Estado actual de Git", en: "Current Git state"))")
-        lines.append("\(language.pick(es: "Rama", en: "Branch")): \(git.branch ?? "HEAD")")
-        lines.append("Staged: \(git.changes.staged)")
-        lines.append("Unstaged: \(git.changes.unstaged)")
-        lines.append("Untracked: \(git.changes.untracked)")
-        lines.append("\(language.pick(es: "Conflictos", en: "Conflicts")): \(git.changes.conflicts)")
-        lines.append("\(language.pick(es: "Commits sin subir", en: "Unpushed commits")): \(git.unpushedCount)")
-        lines.append("Worktrees: \(git.worktrees.count)")
+        if git.freshness == .current {
+            lines.append("\(language.pick(es: "Rama", en: "Branch")): \(git.branch ?? "HEAD")")
+            lines.append("Staged: \(git.changes.staged)")
+            lines.append("Unstaged: \(git.changes.unstaged)")
+            lines.append("Untracked: \(git.changes.untracked)")
+            lines.append("\(language.pick(es: "Conflictos", en: "Conflicts")): \(git.changes.conflicts)")
+            lines.append("\(language.pick(es: "Commits sin subir", en: "Unpushed commits")): \(git.unpushedCount)")
+            lines.append("Worktrees: \(git.worktrees.count)")
+        } else {
+            // S5: a Git read that is not current (failed, or a stale value
+            // retained from an earlier read) verifies no branch or counters, so
+            // they are never printed as if the read had succeeded. Same shape
+            // as the Engram section below.
+            lines.append(language.pick(es: "Sin información.", en: "No information available."))
+            if let error = git.error {
+                lines.append("\(language.pick(es: "Error", en: "Error")): \(error)")
+            }
+        }
         lines.append("")
         lines.append("## \(language.pick(es: "Memoria de Engram", en: "Engram memory"))")
         if context.available, let value = context.value {
