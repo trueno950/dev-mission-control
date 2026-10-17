@@ -456,9 +456,39 @@ func worktreeOrderingTests() {
     }
 }
 
+func diffParserTests() {
+    // MARK: T20/S20 diff line classification for the colored diff sheet
+
+    let sample = """
+    diff --git a/x.txt b/x.txt
+    index 111..222 100644
+    --- a/x.txt
+    +++ b/x.txt
+    @@ -1,3 +1,4 @@
+     context line
+    -removed line
+    +added line
+    """
+    let lines = DiffParser.parse(sample)
+    checkEqual(lines.count, 8, "diff parse keeps every line")
+    checkEqual(lines[0].kind, DiffLineKind.meta, "diff --git is meta")
+    checkEqual(lines[1].kind, DiffLineKind.meta, "index line is meta")
+    checkEqual(lines[2].kind, DiffLineKind.meta, "--- header is meta, not removal")
+    checkEqual(lines[3].kind, DiffLineKind.meta, "+++ header is meta, not addition")
+    checkEqual(lines[4].kind, DiffLineKind.hunkHeader, "@@ line is hunk header")
+    checkEqual(lines[5].kind, DiffLineKind.context, "context line stays context")
+    checkEqual(lines[6].kind, DiffLineKind.removal, "- line is removal")
+    checkEqual(lines[7].kind, DiffLineKind.addition, "+ line is addition")
+    checkEqual(lines[7].text, "+added line", "diff text keeps its sign")
+
+    check(DiffParser.parse("").isEmpty, "empty diff parses to no lines")
+    checkEqual(DiffParser.parse("+solo")[0].kind, DiffLineKind.addition, "bare addition without headers")
+}
+
 // Suites wired per task:
 attentionMathTests()
 worktreeOrderingTests()
+diffParserTests()
 gitScannerTests()
 ghScannerTests()
 engramScannerTests()
