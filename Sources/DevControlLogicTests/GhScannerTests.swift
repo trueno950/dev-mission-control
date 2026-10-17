@@ -125,4 +125,58 @@ func ghScannerTests() {
         check(!status.available, "missing path is unavailable")
         check(status.error == nil, "missing path is quiet for gh")
     }
+
+    // MARK: - T9 source freshness and stale retention
+
+    do {
+        let prJSON = """
+        [{"number": 7, "title": "Add feature", "createdAt": "2026-10-01T10:00:00Z",
+          "statusCheckRollup": []}]
+        """
+        let runner = FakeRunner(outputs: [
+            (("/usr/bin/git", ["-C", "/repos/demo", "remote"]), .success("git@github.com:acme/demo.git\n")),
+            (("/opt/homebrew/bin/gh", ["pr"]), .success(prJSON)),
+        ])
+        let scanner = GhScanner(runner: runner, pathExists: { _ in true })
+        let status = scanner.scan(repoPath: "/repos/demo", slugOverride: nil,
+                                  now: now, calendar: cal)
+        checkEqual(status.freshness, .current, "a successful gh read is current")
+        checkEqual(status.lastReadAt, now, "a successful gh read records its read time")
+        check(!status.isStale, "a successful gh read is not stale")
+    }
+
+    do {
+        // A GitHub failure must never be treated as an empty PR list.
+        let readAt = date(2026, 10, 15)
+        let previous = PRStatus(
+            prs: [PRInfo(number: 14, title: "Fix", ageDays: 2, ciFailing: true)],
+            available: true, lastReadAt: readAt)
+        let failed = PRStatus(available: false, error: "gh auth required")
+        let retained = failed.retainingLastRead(previous)
+        checkEqual(retained.prs, previous.prs, "a gh failure keeps the last known PRs")
+        check(!retained.prs.isEmpty, "a gh failure is not an empty PR list when data exists")
+        checkEqual(retained.available, false, "a gh failure stays reported as unavailable")
+        checkEqual(retained.error, "gh auth required",
+                   "a gh failure still exposes its current error")
+        checkEqual(retained.freshness, .stale, "retained PR data is marked stale")
+        checkEqual(retained.lastReadAt, readAt, "retained PR data keeps its read time")
+    }
+
+    do {
+        let failed = PRStatus(available: false, error: "gh auth required")
+        let retained = failed.retainingLastRead(PRStatus(available: false, error: "older failure"))
+        checkEqual(retained.prs, [], "a gh failure with no prior success stays empty")
+        checkEqual(retained.freshness, .unavailable,
+                   "a gh failure with no prior success is unavailable")
+    }
+
+    do {
+        // A not-applicable source (no origin remote) is unavailable, not stale.
+        let scanner = GhScanner(runner: FakeRunner(outputs: []), pathExists: { _ in true })
+        let status = scanner.scan(repoPath: "/repos/local-only", slugOverride: nil,
+                                  now: now, calendar: cal)
+        checkEqual(status.freshness, .unavailable,
+                   "a repo without origin reports an unavailable source")
+        checkEqual(status.lastReadAt, nil, "an unavailable gh source has no read time")
+    }
 }

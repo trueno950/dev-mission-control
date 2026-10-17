@@ -81,7 +81,7 @@ public struct GitScanner {
             let unpushedCount = unpushedCommitCount(repoPath)
             let worktrees = try scanWorktrees(repoPath, now: now, calendar: calendar)
             return GitStatus(branch: branch, unpushedCount: unpushedCount,
-                             worktrees: worktrees, changes: changes)
+                             worktrees: worktrees, changes: changes, lastReadAt: now)
         } catch {
             return GitStatus(error: describe(error, for: repoPath))
         }
@@ -123,7 +123,7 @@ public struct GitScanner {
         var result: [WorktreeInfo] = []
         for block in linkedBlocks {
             let worktreePath = block.path
-            let changes = (try? statusChanges(worktreePath)) ?? .none
+            let changes = try statusChanges(worktreePath)
             let lastCommitAt = block.headCommit.flatMap { timestamps[$0] }
             let ageDays: Int
             if let lastCommitAt {

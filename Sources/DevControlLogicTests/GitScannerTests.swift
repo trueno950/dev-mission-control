@@ -330,4 +330,84 @@ func gitScannerTests() {
         check(status.error?.contains("not a git repository") == true,
               "git failure surfaces its stderr")
     }
+
+    // MARK: - T9 partial Git failures must not look clean
+
+    do {
+        let repoPath = "/repos/demo"
+        let worktreePath = "/repos/demo/.atl/locked"
+        let runner = FakeRunner(outputs: [
+            (("/usr/bin/git", ["-C", repoPath, "status"]), .success("")),
+            (("/usr/bin/git", ["-C", repoPath, "symbolic-ref"]), .success("main\n")),
+            (("/usr/bin/git", ["-C", repoPath, "rev-list"]), .success("0\n")),
+            (("/usr/bin/git", ["-C", repoPath, "worktree"]), .success("""
+                worktree \(repoPath)
+                HEAD abc
+                branch refs/heads/main
+
+                worktree \(worktreePath)
+                HEAD def
+                detached
+
+                """)),
+            (("/usr/bin/git", ["-C", repoPath, "log"]), .success("def\t100\n")),
+            (("/usr/bin/git", ["-C", worktreePath, "status"]),
+             .failure(scannerError("unable to read linked worktree"))),
+        ])
+        let status = GitScanner(runner: runner, pathExists: { _ in true })
+            .scan(repoPath: repoPath, now: now, calendar: cal)
+        checkEqual(status.freshness, .unavailable,
+                   "a linked-worktree Git error cannot produce a falsely clean repo")
+        check(status.error?.contains("unable to read linked worktree") == true,
+              "linked-worktree Git failure is surfaced")
+    }
+
+    // MARK: - T9 source freshness and stale retention
+
+    do {
+        let fresh = GitScanner(runner: FakeRunner(outputs: [
+            (("/usr/bin/git", ["-C", "/repos/demo", "status"]), .success("")),
+            (("/usr/bin/git", ["-C", "/repos/demo", "symbolic-ref"]), .success("main\n")),
+            (("/usr/bin/git", ["-C", "/repos/demo", "rev-list"]), .success("1\n")),
+            (("/usr/bin/git", ["-C", "/repos/demo", "worktree"]),
+             .success("worktree /repos/demo\nHEAD abc\nbranch refs/heads/main\n")),
+        ]), pathExists: { _ in true }).scan(repoPath: "/repos/demo", now: now, calendar: cal)
+        checkEqual(fresh.freshness, .current, "successful git read is current")
+        checkEqual(fresh.lastReadAt, now, "successful git read records its read time")
+        check(!fresh.isStale, "successful git read is not stale")
+    }
+
+    do {
+        let inaccessible = GitScanner(runner: FakeRunner(outputs: [
+            (("/usr/bin/git", ["-C", "/repos/demo", "status"]),
+             .failure(scannerError("fatal: unable to read repository"))),
+        ]), pathExists: { _ in true }).scan(repoPath: "/repos/demo", now: now, calendar: cal)
+        checkEqual(inaccessible.freshness, .unavailable,
+                   "a failed first git read is unavailable")
+        check(inaccessible.lastReadAt == nil, "a failed first git read has no read time")
+        check(!inaccessible.isStale, "a failed first git read is not stale")
+    }
+
+    do {
+        let readAt = date(2026, 10, 15)
+        let previous = GitStatus(branch: "main", unpushedCount: 4,
+                                 worktrees: [WorktreeInfo(path: "/r/.atl/w", name: "w",
+                                                          isDirty: false, ageDays: 3)],
+                                 changes: ChangeCounts(unstaged: 2),
+                                 lastReadAt: readAt)
+        let retained = GitStatus(error: "git timed out").retainingLastRead(previous)
+        checkEqual(retained.error, "git timed out", "retained git value keeps the current failure")
+        checkEqual(retained.freshness, .stale, "retained git value is marked stale")
+        checkEqual(retained.lastReadAt, readAt, "retained git value keeps its read time")
+        checkEqual(retained.branch, "main", "retained git value keeps the last branch")
+        checkEqual(retained.changes.unstaged, 2, "retained git value keeps the last change counts")
+        checkEqual(retained.unpushedCount, 4, "retained git value keeps the last unpushed count")
+        checkEqual(retained.worktrees.count, 1, "retained git value keeps the last worktrees")
+    }
+
+    do {
+        let retained = GitStatus(error: "git timed out").retainingLastRead(nil)
+        checkEqual(retained.freshness, .unavailable,
+                   "no prior git value leaves the source unavailable")
+    }
 }

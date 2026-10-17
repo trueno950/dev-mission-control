@@ -39,7 +39,7 @@ public struct EngramScanner {
                                       error: "Engram returned HTTP \(code)")
             }
             let activity = try EngramParser.parseNewestObservation(data)
-            return ActivityStatus(activity: activity, available: true)
+            return ActivityStatus(activity: activity, available: true, lastReadAt: Date())
         } catch {
             return ActivityStatus(available: false,
                                   error: "Engram unreachable: \(error.localizedDescription)")

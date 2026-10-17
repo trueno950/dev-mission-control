@@ -100,6 +100,22 @@ public struct AppConfig: Codable, Hashable, Sendable {
 
 // MARK: - Scan results
 
+/// Freshness of the value a read-only source currently holds (S5/S12).
+/// Derived from whether the latest read attempt succeeded and whether a value
+/// from an earlier successful read is being retained.
+public enum SourceFreshness: String, Hashable, Sendable {
+    /// The latest read attempt succeeded; the value is current.
+    case current
+    /// The latest read attempt failed; the held value is retained from the last
+    /// successful read and the current failure is exposed separately.
+    case stale
+    /// The latest read attempt failed and no earlier value is available.
+    case unavailable
+
+    /// Whether the source's latest read attempt succeeded.
+    public var isAvailable: Bool { self == .current }
+}
+
 /// Normalized working-tree change counts for one checkout or linked worktree,
 /// derived from `git status --porcelain=v1`. The category counts describe
 /// membership, so a file staged and then modified again appears in both
@@ -206,13 +222,25 @@ public struct GitStatus: Hashable, Sendable {
     public var worktrees: [WorktreeInfo]
     /// Non-nil when the repository could not be scanned (missing path, not a repo).
     public var error: String?
+    /// When the held Git value was successfully read; nil when never read.
+    public var lastReadAt: Date?
+    /// True when `lastReadAt` is from an earlier successful read and the latest
+    /// attempt failed, so the held value is retained rather than current.
+    public var isStale: Bool
+
+    /// Identity, read time, availability, and freshness of this Git read (S5).
+    public var freshness: SourceFreshness {
+        if isStale { return .stale }
+        return error == nil ? .current : .unavailable
+    }
 
     /// Backward-compatible: number of pending files in the primary checkout.
     public var dirtyCount: Int { changes.pendingFiles }
 
     public init(branch: String? = nil, dirtyCount: Int = 0, unpushedCount: Int = 0,
                 worktrees: [WorktreeInfo] = [], error: String? = nil,
-                changes: ChangeCounts? = nil) {
+                changes: ChangeCounts? = nil, lastReadAt: Date? = nil,
+                isStale: Bool = false) {
         self.branch = branch
         // Legacy callers supply only `dirtyCount`; without a category
         // breakdown the total is attributed to unstaged changes.
@@ -220,34 +248,105 @@ public struct GitStatus: Hashable, Sendable {
         self.unpushedCount = unpushedCount
         self.worktrees = worktrees
         self.error = error
+        self.lastReadAt = lastReadAt
+        self.isStale = isStale
+    }
+
+    /// S5/S12: when the latest read failed after a successful one, keep the
+    /// last valid value marked stale while still exposing the current failure.
+    public func retainingLastRead(_ previous: GitStatus?) -> GitStatus {
+        guard error != nil, let previous, previous.freshness != .unavailable else { return self }
+        var retained = self
+        retained.branch = previous.branch
+        retained.changes = previous.changes
+        retained.unpushedCount = previous.unpushedCount
+        retained.worktrees = previous.worktrees
+        retained.lastReadAt = previous.lastReadAt
+        retained.isStale = true
+        return retained
     }
 }
 
 /// Result of scanning one repository with the `gh` CLI.
 public struct PRStatus: Hashable, Sendable {
     public var prs: [PRInfo]
-    /// False when `gh` is missing, unauthenticated, or the call failed.
+    /// Whether the latest `gh` read succeeded. False when `gh` is missing,
+    /// unauthenticated, or the call failed.
     public var available: Bool
     public var error: String?
+    /// When the held PR value was successfully read; nil when never read.
+    public var lastReadAt: Date?
+    /// True when the held value is retained from an earlier successful read
+    /// because the latest attempt failed.
+    public var isStale: Bool
 
-    public init(prs: [PRInfo] = [], available: Bool = false, error: String? = nil) {
+    /// Identity, read time, availability, and freshness of this GitHub read (S5).
+    public var freshness: SourceFreshness {
+        if isStale { return .stale }
+        return available ? .current : .unavailable
+    }
+
+    public init(prs: [PRInfo] = [], available: Bool = false, error: String? = nil,
+                lastReadAt: Date? = nil, isStale: Bool = false) {
         self.prs = prs
         self.available = available
         self.error = error
+        self.lastReadAt = lastReadAt
+        self.isStale = isStale
+    }
+
+    /// S5/S12: a GitHub failure is never an empty PR list. When a previous read
+    /// succeeded, retain its PRs marked stale and keep the current error
+    /// exposed through `available`/`error`.
+    public func retainingLastRead(_ previous: PRStatus?) -> PRStatus {
+        guard !available, error != nil, let previous,
+              previous.freshness != .unavailable else { return self }
+        var retained = self
+        retained.prs = previous.prs
+        retained.lastReadAt = previous.lastReadAt
+        retained.isStale = true
+        return retained
     }
 }
 
 /// Result of the Engram activity lookup for one project.
 public struct ActivityStatus: Hashable, Sendable {
     public var activity: ActivityInfo?
-    /// False when the Engram server is unreachable or the request failed.
+    /// Whether the latest Engram read succeeded. False when the server is
+    /// unreachable or the request failed.
     public var available: Bool
     public var error: String?
+    /// When the held activity value was successfully read; nil when never read.
+    public var lastReadAt: Date?
+    /// True when the held value is retained from an earlier successful read
+    /// because the latest attempt failed.
+    public var isStale: Bool
 
-    public init(activity: ActivityInfo? = nil, available: Bool = false, error: String? = nil) {
+    /// Identity, read time, availability, and freshness of this Engram read (S5).
+    public var freshness: SourceFreshness {
+        if isStale { return .stale }
+        return available ? .current : .unavailable
+    }
+
+    public init(activity: ActivityInfo? = nil, available: Bool = false, error: String? = nil,
+                lastReadAt: Date? = nil, isStale: Bool = false) {
         self.activity = activity
         self.available = available
         self.error = error
+        self.lastReadAt = lastReadAt
+        self.isStale = isStale
+    }
+
+    /// S5/S12: when Engram becomes unreachable, keep the last valid activity
+    /// marked stale while still exposing the current failure.
+    public func retainingLastRead(_ previous: ActivityStatus?) -> ActivityStatus {
+        guard !available, error != nil, let previous,
+              previous.freshness != .unavailable else { return self }
+        var retained = self
+        retained.activity = previous.activity
+        retained.lastReadAt = previous.lastReadAt
+        retained.isStale = true
+        return retained
     }
 }
 
@@ -264,5 +363,15 @@ public struct RepoSnapshot: Hashable, Sendable {
         self.git = git
         self.pr = pr
         self.activity = activity
+    }
+
+    /// S5/S12: each source independently retains its last successful read
+    /// marked stale after a failure, so a `gh` or Engram outage never discards
+    /// Git data and never fabricates an empty result.
+    public func retainingLastRead(_ previous: RepoSnapshot?) -> RepoSnapshot {
+        RepoSnapshot(config: config,
+                     git: git.retainingLastRead(previous?.git),
+                     pr: pr.retainingLastRead(previous?.pr),
+                     activity: activity.retainingLastRead(previous?.activity))
     }
 }
