@@ -14,7 +14,8 @@ final class RepositoryDetailWindowController {
     func show(appState: AppState,
               repoPath: String,
               focusWorktreePath: String?,
-              onOpenSettings: @escaping () -> Void) {
+              onOpenSettings: @escaping () -> Void,
+              onOpenEngramPanel: @escaping () -> Void) {
         let state: DetailViewState
         if let existing = states[repoPath] {
             state = existing
@@ -34,7 +35,8 @@ final class RepositoryDetailWindowController {
                 appState: appState,
                 repoPath: repoPath,
                 state: state,
-                onOpenSettings: onOpenSettings))
+                onOpenSettings: onOpenSettings,
+                onOpenEngramPanel: onOpenEngramPanel))
             let newWindow = NSWindow(contentViewController: hosting)
             newWindow.styleMask = [.titled, .closable, .resizable, .miniaturizable]
             newWindow.setContentSize(NSSize(width: 560, height: 640))
@@ -94,17 +96,20 @@ struct RepositoryDetailView: View {
     let repoPath: String
     @ObservedObject var state: DetailViewState
     let onOpenSettings: () -> Void
+    let onOpenEngramPanel: () -> Void
 
     private var snapshot: RepoSnapshot? {
         appState.snapshots.first { $0.config.path == repoPath }
     }
 
     init(appState: AppState, repoPath: String, state: DetailViewState,
-         onOpenSettings: @escaping () -> Void) {
+         onOpenSettings: @escaping () -> Void,
+         onOpenEngramPanel: @escaping () -> Void) {
         self.appState = appState
         self.repoPath = repoPath
         self.state = state
         self.onOpenSettings = onOpenSettings
+        self.onOpenEngramPanel = onOpenEngramPanel
     }
 
     var body: some View {
@@ -131,7 +136,9 @@ struct RepositoryDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     header(snapshot)
-                    SourceFreshnessRow(snapshot: snapshot, showsMemoriesAction: true)
+                    engramPanelEntry
+                    SourceFreshnessRow(snapshot: snapshot, showsMemoriesAction: true,
+                                       onOpenEngramPanel: onOpenEngramPanel)
                     findingsSection(snapshot)
                     pullRequestsSection(snapshot)
                     checkoutSection(snapshot)
@@ -151,6 +158,29 @@ struct RepositoryDetailView: View {
     }
 
     // MARK: - Sections
+
+    /// T17 visible entry point: opens the per-project Engram panel window.
+    private var engramPanelEntry: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "text.book.closed")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(L10n.t("Memorias de Engram", "Engram memories"))
+                .font(.caption.weight(.semibold))
+            Spacer(minLength: 4)
+            Button {
+                onOpenEngramPanel()
+            } label: {
+                Label(L10n.t("Abrir panel", "Open panel"), systemImage: "square.grid.2x2")
+            }
+            .controlSize(.small)
+            .help(L10n.t("Abre el panel de memorias de Engram de este proyecto",
+                         "Opens this project's Engram memories panel"))
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
 
     private func header(_ snapshot: RepoSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 4) {

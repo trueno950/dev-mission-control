@@ -22,6 +22,7 @@ struct MissionControlPanelView: View {
     @ObservedObject var appState: AppState
     let onOpenSettings: () -> Void
     let onOpenDetail: (_ repoPath: String, _ focusWorktreePath: String?) -> Void
+    let onOpenEngramPanel: (_ repoPath: String) -> Void
     let onQuit: () -> Void
     @StateObject private var ui = PanelUIState()
 
@@ -37,7 +38,10 @@ struct MissionControlPanelView: View {
                         if !appState.attentionOrder.isEmpty {
                             sectionTitle(L10n.t("Necesitan atención", "Needs attention"))
                             ForEach(appState.attentionOrder, id: \.config.path) { snapshot in
-                                ProjectCard(appState: appState, snapshot: snapshot) { focus in
+                                ProjectCard(appState: appState, snapshot: snapshot,
+                                            onOpenEngramPanel: {
+                                    onOpenEngramPanel(snapshot.config.path)
+                                }) { focus in
                                     onOpenDetail(snapshot.config.path, focus)
                                 }
                             }
@@ -45,7 +49,10 @@ struct MissionControlPanelView: View {
                         if ui.filter == .all, !appState.cleanOrder.isEmpty {
                             sectionTitle(L10n.t("Otros proyectos", "Other projects"))
                             ForEach(appState.cleanOrder, id: \.config.path) { snapshot in
-                                ProjectCard(appState: appState, snapshot: snapshot) { focus in
+                                ProjectCard(appState: appState, snapshot: snapshot,
+                                            onOpenEngramPanel: {
+                                    onOpenEngramPanel(snapshot.config.path)
+                                }) { focus in
                                     onOpenDetail(snapshot.config.path, focus)
                                 }
                             }
@@ -193,6 +200,9 @@ struct MissionControlPanelView: View {
 struct ProjectCard: View {
     @ObservedObject var appState: AppState
     let snapshot: RepoSnapshot
+    /// Primary Engram action: opens the per-project panel window. The TUI
+    /// stays available as a secondary small action inside the Engram row.
+    var onOpenEngramPanel: (() -> Void)? = nil
     let onOpenDetail: (_ focusWorktreePath: String?) -> Void
 
     private var items: [AttentionItem] { appState.items(for: snapshot) }
@@ -227,7 +237,8 @@ struct ProjectCard: View {
                     .foregroundStyle(items.isEmpty ? Color.secondary : Color.primary)
             }
             primaryNoticeRow
-            SourceFreshnessRow(snapshot: snapshot)
+            SourceFreshnessRow(snapshot: snapshot,
+                               onOpenEngramPanel: onOpenEngramPanel)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -324,6 +335,9 @@ struct ProjectCard: View {
 struct SourceFreshnessRow: View {
     let snapshot: RepoSnapshot
     var showsMemoriesAction: Bool = false
+    /// When set, the Engram row's primary action opens the panel window and
+    /// the TUI becomes a secondary, honestly labelled action.
+    var onOpenEngramPanel: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -337,7 +351,8 @@ struct SourceFreshnessRow: View {
                                  error: snapshot.activity.error,
                                  extras: [activityDateLine, summaryLine].compactMap { $0 },
                                  detailLine: activityTitleLine,
-                                 showsMemoriesAction: showsMemoriesAction)
+                                 showsMemoriesAction: showsMemoriesAction,
+                                 onOpenEngramPanel: onOpenEngramPanel)
         }
         .accessibilityElement(children: .contain)
     }
@@ -383,6 +398,7 @@ struct SourceFreshnessBadge: View {
     var extras: [String] = []
     var detailLine: String? = nil
     var showsMemoriesAction: Bool = false
+    var onOpenEngramPanel: (() -> Void)? = nil
     @StateObject private var ui = BadgeRowUI()
 
     var body: some View {
@@ -408,16 +424,27 @@ struct SourceFreshnessBadge: View {
                 }
             }
             Spacer(minLength: 2)
-            if showsMemoriesAction, source == "Engram", freshness != .unavailable {
+            if showsEngramAction, source == "Engram", freshness != .unavailable {
+                if let onOpenEngramPanel {
+                    Button {
+                        onOpenEngramPanel()
+                    } label: {
+                        Label(L10n.t("Abrir panel", "Open panel"), systemImage: "square.grid.2x2")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.mini)
+                    .help(L10n.t("Abre el panel de memorias de Engram de este proyecto",
+                                 "Opens this project's Engram memories panel"))
+                }
                 Button {
-                    openMemories()
+                    openTUI()
                 } label: {
-                    Label(L10n.t("Abrir memorias", "Open memories"), systemImage: "text.book.closed")
+                    Label(L10n.t("TUI global", "Global TUI"), systemImage: "terminal")
                 }
                 .buttonStyle(.borderless)
                 .controlSize(.mini)
-                .help(L10n.t("Abre las memorias de Engram en Terminal (engram tui)",
-                             "Opens the Engram memories in Terminal (engram tui)"))
+                .help(L10n.t("Abre el TUI de Engram en Terminal. Es global y tarda unos segundos (~5 s).",
+                             "Opens the Engram TUI in Terminal. It is global and takes a few seconds (~5 s)."))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -435,21 +462,15 @@ struct SourceFreshnessBadge: View {
         }
     }
 
-    /// Opens the supported Engram terminal UI in macOS Terminal. The command
-    /// is fixed (no user paths) and is executed through osascript with
-    /// separate arguments.
-    private func openMemories() {
-        let script = "tell application \"Terminal\" to do script \"engram tui\""
+    private var showsEngramAction: Bool {
+        showsMemoriesAction || onOpenEngramPanel != nil
+    }
+
+    /// Secondary Engram action: the shared TUI launcher. The TUI is global and
+    /// slow, which the label and help text state honestly (S7).
+    private func openTUI() {
         Task { @MainActor in
-            let error = await Task.detached(priority: .userInitiated) { () -> String? in
-                do {
-                    _ = try ProcessRunner().run("/usr/bin/osascript", ["-e", script], in: nil)
-                    return nil
-                } catch {
-                    return error.localizedDescription
-                }
-            }.value
-            if let error { ui.memoriesError = error }
+            if let error = await EngramTUI.open() { ui.memoriesError = error }
         }
     }
 
