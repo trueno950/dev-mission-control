@@ -316,29 +316,63 @@ struct ProjectCard: View {
     }
 }
 
-/// Per-source freshness badges with visible read times and relevant data:
-/// GitHub shows its open-PR count and Engram shows its latest activity plus
-/// saved session summary. Connection state stays separate from memory
-/// freshness (S19).
+/// Per-source freshness as one airy row per source with the read time and
+/// relevant data inline: GitHub shows its open-PR count; Engram shows its
+/// latest activity (title and date) plus saved summary, with an action to
+/// open the memories TUI. Connection state stays separate from memory
+/// freshness (S19/S20).
 struct SourceFreshnessRow: View {
     let snapshot: RepoSnapshot
+    var showsMemoriesAction: Bool = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             SourceFreshnessBadge(source: "Git", freshness: snapshot.git.freshness,
                                  lastReadAt: snapshot.git.lastReadAt, error: snapshot.git.error)
             SourceFreshnessBadge(source: "GitHub", freshness: snapshot.pr.freshness,
                                  lastReadAt: snapshot.pr.lastReadAt, error: snapshot.pr.error,
-                                 openPRCount: snapshot.pr.freshness == .current
-                                     ? snapshot.pr.prs.count : nil)
+                                 extras: [pullRequestLine].compactMap { $0 })
             SourceFreshnessBadge(source: "Engram", freshness: snapshot.activity.freshness,
                                  lastReadAt: snapshot.activity.lastReadAt,
                                  error: snapshot.activity.error,
-                                 lastActivity: snapshot.activity.activity,
-                                 savedSummary: snapshot.activity.summary)
+                                 extras: [activityDateLine, summaryLine].compactMap { $0 },
+                                 detailLine: activityTitleLine,
+                                 showsMemoriesAction: showsMemoriesAction)
         }
         .accessibilityElement(children: .contain)
     }
+
+    private var pullRequestLine: String? {
+        guard snapshot.pr.freshness == .current else { return nil }
+        let count = snapshot.pr.prs.count
+        if count == 0 { return L10n.t("Sin PRs abiertas", "No open PRs") }
+        return L10n.t("\(count) PR\(count == 1 ? "" : "s") abierta\(count == 1 ? "" : "s")",
+                      "\(count) open PR\(count == 1 ? "" : "s")")
+    }
+
+    private var activityDateLine: String? {
+        guard let activity = snapshot.activity.activity else { return nil }
+        return "\(L10n.t("Actividad", "Activity")) · \(activity.date.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    private var activityTitleLine: String? {
+        guard let activity = snapshot.activity.activity else { return nil }
+        return "\(L10n.t("Actividad", "Activity")): \(activity.title)"
+    }
+
+    private var summaryLine: String? {
+        guard let savedSummary = snapshot.activity.summary else {
+            return snapshot.activity.freshness == .current
+                ? L10n.t("Sin resumen guardado", "No saved summary") : nil
+        }
+        return "\(L10n.t("Resumen guardado", "Saved summary")) · \(savedSummary.date.formatted(date: .abbreviated, time: .shortened))"
+    }
+}
+
+/// Local error state for the memories action of one freshness row.
+@MainActor
+private final class BadgeRowUI: ObservableObject {
+    @Published var memoriesError: String?
 }
 
 struct SourceFreshnessBadge: View {
@@ -346,45 +380,77 @@ struct SourceFreshnessBadge: View {
     let freshness: SourceFreshness
     let lastReadAt: Date?
     let error: String?
-    var openPRCount: Int?
-    var lastActivity: ActivityInfo?
-    var savedSummary: SessionSummaryInfo?
+    var extras: [String] = []
+    var detailLine: String? = nil
+    var showsMemoriesAction: Bool = false
+    @StateObject private var ui = BadgeRowUI()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 3) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 5, height: 5)
-                Text(source)
-                    .font(.system(size: 9, weight: .semibold))
-                Text(stateText)
+        HStack(alignment: .top, spacing: 6) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 5, height: 5)
+                .padding(.top, 3)
+            Text(source)
+                .font(.system(size: 9, weight: .semibold))
+                .frame(width: 44, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(extras.isEmpty ? stateText : ([stateText] + extras).joined(separator: " · "))
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
-            }
-            if let pullRequestLine {
-                Text(pullRequestLine)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
+                if let detailLine {
+                    Text(detailLine)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
-            if let activityLine {
-                Text(activityLine)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-            if let summaryLine {
-                Text(summaryLine)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+            Spacer(minLength: 2)
+            if showsMemoriesAction, source == "Engram", freshness != .unavailable {
+                Button {
+                    openMemories()
+                } label: {
+                    Label(L10n.t("Abrir memorias", "Open memories"), systemImage: "text.book.closed")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.mini)
+                .help(L10n.t("Abre las memorias de Engram en Terminal (engram tui)",
+                             "Opens the Engram memories in Terminal (engram tui)"))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .help(helpText)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(helpText)
+        .alert(L10n.t("No se pudieron abrir las memorias", "Could not open the memories"),
+               isPresented: Binding(
+            get: { ui.memoriesError != nil },
+            set: { if !$0 { ui.memoriesError = nil } }
+        )) {
+            Button("OK", role: .cancel) { ui.memoriesError = nil }
+        } message: {
+            Text(ui.memoriesError ?? L10n.t("Error desconocido", "Unknown error"))
+        }
+    }
+
+    /// Opens the supported Engram terminal UI in macOS Terminal. The command
+    /// is fixed (no user paths) and is executed through osascript with
+    /// separate arguments.
+    private func openMemories() {
+        let script = "tell application \"Terminal\" to do script \"engram tui\""
+        Task { @MainActor in
+            let error = await Task.detached(priority: .userInitiated) { () -> String? in
+                do {
+                    _ = try ProcessRunner().run("/usr/bin/osascript", ["-e", script], in: nil)
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            }.value
+            if let error { ui.memoriesError = error }
+        }
     }
 
     private var statusColor: Color {
@@ -413,26 +479,6 @@ struct SourceFreshnessBadge: View {
         lastReadAt?.formatted(date: .omitted, time: .shortened) ?? L10n.t("sin lectura", "no read")
     }
 
-    private var pullRequestLine: String? {
-        guard source == "GitHub", freshness == .current, let openPRCount else { return nil }
-        if openPRCount == 0 { return L10n.t("Sin PRs abiertas", "No open PRs") }
-        return L10n.t("\(openPRCount) PR\(openPRCount == 1 ? "" : "s") abierta\(openPRCount == 1 ? "" : "s")",
-                      "\(openPRCount) open PR\(openPRCount == 1 ? "" : "s")")
-    }
-
-    private var activityLine: String? {
-        guard source == "Engram", let lastActivity else { return nil }
-        return "\(L10n.t("Actividad", "Activity")) · \(lastActivity.date.formatted(date: .abbreviated, time: .shortened))"
-    }
-
-    private var summaryLine: String? {
-        guard source == "Engram" else { return nil }
-        guard let savedSummary else {
-            return freshness == .current ? L10n.t("Sin resumen guardado", "No saved summary") : nil
-        }
-        return "\(L10n.t("Resumen guardado", "Saved summary")) · \(savedSummary.date.formatted(date: .abbreviated, time: .shortened))"
-    }
-
     private var helpText: String {
         var parts = ["\(source): \(stateText)"]
         if let lastReadAt {
@@ -440,18 +486,8 @@ struct SourceFreshnessBadge: View {
         } else {
             parts.append(L10n.t("sin lecturas exitosas", "no successful reads"))
         }
-        if let openPRCount {
-            parts.append(L10n.t("\(openPRCount) PRs abiertas", "\(openPRCount) open PRs"))
-        }
-        if let lastActivity {
-            parts.append("\(L10n.t("última actividad", "last activity")): \(lastActivity.title)")
-        }
-        if let savedSummary {
-            parts.append("\(L10n.t("último resumen guardado", "last saved summary")) \(savedSummary.date.formatted(date: .abbreviated, time: .standard))")
-        } else if source == "Engram", freshness == .current {
-            parts.append(L10n.t("sin resumen guardado en las últimas observaciones",
-                                "no saved summary in the recent observations"))
-        }
+        for extra in extras { parts.append(extra) }
+        if let detailLine { parts.append(detailLine) }
         if let error { parts.append("\(L10n.t("error actual", "current error")): \(error)") }
         return parts.joined(separator: " · ")
     }
@@ -717,14 +753,40 @@ private struct WorktreeDiffSheet: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView([.horizontal, .vertical]) {
-                    Text(diff)
-                        .font(.system(size: 11, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(DiffParser.parse(diff).enumerated()), id: \.offset) { _, line in
+                            Text(line.text)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(color(for: line.kind))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(rowBackground(for: line.kind))
+                                .textSelection(.enabled)
+                        }
+                    }
                 }
             }
         }
         .padding(16)
         .frame(minWidth: 620, minHeight: 420)
+    }
+
+    /// S20: additions render green, removals red; metadata dims and hunk
+    /// headers use the accent color.
+    private func color(for kind: DiffLineKind) -> Color {
+        switch kind {
+        case .addition: return .green
+        case .removal: return .red
+        case .hunkHeader: return .accentColor
+        case .meta: return .secondary
+        case .context: return .primary
+        }
+    }
+
+    private func rowBackground(for kind: DiffLineKind) -> Color {
+        switch kind {
+        case .addition: return Color.green.opacity(0.12)
+        case .removal: return Color.red.opacity(0.12)
+        default: return .clear
+        }
     }
 }

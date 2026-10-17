@@ -131,8 +131,9 @@ struct RepositoryDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     header(snapshot)
-                    SourceFreshnessRow(snapshot: snapshot)
+                    SourceFreshnessRow(snapshot: snapshot, showsMemoriesAction: true)
                     findingsSection(snapshot)
+                    pullRequestsSection(snapshot)
                     checkoutSection(snapshot)
                     worktreesSection(snapshot)
                     sourceErrors(snapshot)
@@ -222,6 +223,49 @@ struct RepositoryDetailView: View {
                     .accessibilityLabel(item.worktreePath == nil
                                         ? item.message
                                         : "Ir a \(item.message)")
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
+    /// S20: open PRs with a direct browser link using only the HTTPS URL
+    /// returned by `gh`.
+    @ViewBuilder
+    private func pullRequestsSection(_ snapshot: RepoSnapshot) -> some View {
+        if snapshot.pr.freshness == .current, !snapshot.pr.prs.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.t("Pull requests", "Pull requests"))
+                    .font(.caption.weight(.semibold))
+                ForEach(snapshot.pr.prs, id: \.number) { pr in
+                    HStack(alignment: .top, spacing: 6) {
+                        Circle()
+                            .fill(pr.ciFailing ? Color.red : Color.green)
+                            .frame(width: 6, height: 6)
+                            .padding(.top, 3)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("PR #\(pr.number) · \(pr.title)")
+                                .font(.caption)
+                                .lineLimit(1)
+                            Text(L10n.t("abierta \(pr.ageDays) \(pr.ageDays == 1 ? "día" : "días")\(pr.ciFailing ? " · checks fallidos" : "")",
+                                        "open \(pr.ageDays) day\(pr.ageDays == 1 ? "" : "s")\(pr.ciFailing ? " · failing checks" : "")"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 2)
+                        if let url = pr.webURL {
+                            Button {
+                                NSWorkspace.shared.open(url)
+                            } label: {
+                                Label(L10n.t("Abrir", "Open"), systemImage: "safari")
+                            }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .help(L10n.t("Abrir la PR en el navegador", "Open the pull request in the browser"))
+                        }
+                    }
                 }
             }
             .padding(10)
