@@ -202,8 +202,8 @@ public struct GitScanner {
             result.append(WorktreeInfo(path: worktreePath,
                                        name: (worktreePath as NSString).lastPathComponent,
                                        isDirty: changes.isDirty, ageDays: ageDays,
-                                       branch: block.branch, lastCommitAt: lastCommitAt,
-                                       changes: changes))
+                                       branch: block.branch, headCommit: block.headCommit,
+                                       lastCommitAt: lastCommitAt, changes: changes))
         }
         return result
     }

@@ -39,7 +39,7 @@ public struct GhScanner {
         do {
             let output = try runner.run(gh, ["pr", "list", "-R", slug, "--state", "open",
                                              "--limit", "20",
-                                             "--json", "number,title,createdAt,statusCheckRollup"],
+                                             "--json", "number,title,createdAt,statusCheckRollup,headRefName,headRefOid,url"],
                                         in: nil)
             guard let data = output.data(using: .utf8) else {
                 return PRStatus(available: false, error: "gh produced non-UTF8 output")
@@ -114,9 +114,13 @@ public enum GhParser {
         let title: String
         let createdAt: String
         let statusCheckRollup: [RolloutCheck]?
+        let headRefName: String?
+        let headRefOid: String?
+        let url: String?
     }
 
-    /// Parses `gh pr list --json number,title,createdAt,statusCheckRollup`.
+    /// Parses the structured fields requested from `gh pr list`, including
+    /// exact head branch/commit metadata for verified worktree association.
     public static func parsePRList(_ data: Data, now: Date,
                                    calendar: Calendar = .current) throws -> [PRInfo] {
         let entries = try JSONDecoder().decode([PRListEntry].self, from: data)
@@ -134,7 +138,9 @@ public enum GhParser {
                     || check.state?.uppercased() == "FAILURE"
             }
             return PRInfo(number: entry.number, title: entry.title,
-                          ageDays: ageDays, ciFailing: failing)
+                          ageDays: ageDays, ciFailing: failing,
+                          headRefName: entry.headRefName, headRefOid: entry.headRefOid,
+                          url: entry.url)
         }
     }
 

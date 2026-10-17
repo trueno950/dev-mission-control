@@ -23,10 +23,10 @@ A project is paused only when explicitly configured as paused. Pausing suppresse
 
 All access is read-only. The app never mutates a repository and stores no credentials.
 
-- **Local git** (`/usr/bin/git`): primary checkout branch, categorized `git status --porcelain=v1` counts (staged, unstaged, untracked, unmerged conflicts), unpushed commit count (`rev-list @{u}..HEAD`), and `git worktree list --porcelain` with each linked worktree's branch, path, change counts, and last-commit age.
+- **Local git** (`/usr/bin/git`): primary checkout branch, categorized `git status --porcelain=v1` counts (staged, unstaged, untracked, unmerged conflicts), unpushed commit count (`rev-list @{u}..HEAD`), and `git worktree list --porcelain` with each linked worktree's branch, HEAD object ID, path, change counts, and last-commit age.
 
 The primary checkout branch is distinct from linked-worktree branches. Pending changes are a repository-state signal, not a claim about agent liveness. Actions remain read-only: the app never commits, pushes, merges, or removes worktrees.
-- **`gh` CLI**: `gh pr list -R <owner/repo> --state open --json number,title,createdAt,statusCheckRollup` for open PR age and CI state. The slug is taken from the config when set, otherwise derived from the `origin` remote.
+- **`gh` CLI**: `gh pr list -R <owner/repo> --state open --json number,title,createdAt,statusCheckRollup,headRefName,headRefOid,url` for open PR age, CI state, and verified worktree association. The slug is taken from the config when set, otherwise derived from the `origin` remote.
 - **Engram HTTP API**: `GET http://127.0.0.1:7437/observations?project=<name>&limit=1` for the most recent agent activity of the project.
 
 ## Source states and freshness
@@ -42,6 +42,10 @@ Each source — local Git, the `gh` CLI, and the Engram HTTP API — is read ind
 A failed refresh never erases the last good value: the retained value is marked stale and the current error is reported alongside it, so a `gh` failure is never an empty PR list and an Engram outage is never "no activity". Only current reads create findings; an unavailable or stale source is "no information", not an attention alert. Each source degrades independently, so local Git stays queryable when `gh` or Engram is down.
 
 Scans are non-overlapping: a manual or scheduled refresh is skipped while one is already running, so the panel never blocks. Every external operation is bounded — `git` and `gh` subprocesses time out after 30 s by default, and Engram requests use a 3 s request / 5 s resource timeout. Periodic scanning never calls a model. Subprocesses are launched by executable path with a separate argument vector; repository paths are passed as discrete `-C` arguments and are never concatenated into a shell command string.
+
+## Worktree actions
+
+Each linked worktree has an Actions menu to open its folder in the Editor selected in Settings, open it in macOS Terminal or Finder, copy its path, or display `git diff HEAD`. The diff includes staged and unstaged tracked changes; untracked files are not included. A pull-request action appears only when exactly one current PR has both the same branch name and HEAD object ID as the worktree and `gh` returned an HTTPS URL. Branch-only or stale-data matches are not opened. These actions do not commit, push, merge, or remove worktrees.
 
 ## Requirements
 
@@ -112,7 +116,8 @@ The file is created on first save (from the Settings window). Set the `DMC_CONFI
   "refreshIntervalMinutes": 5,
   "staleWorktreeDays": 7,
   "stalePRDays": 7,
-  "inactivityDays": 14
+  "inactivityDays": 14,
+  "editorApplicationPath": "/Applications/Code Editor.app"
 }
 ```
 
@@ -128,8 +133,9 @@ The file is created on first save (from the Settings window). Set the `DMC_CONFI
 | `staleWorktreeDays` | Informational threshold for clean idle worktrees (default 7) |
 | `stalePRDays` | Informational open-PR age threshold; age alone is not urgent (default 7) |
 | `inactivityDays` | Engram inactivity threshold in days (default 14) |
+| `editorApplicationPath` | Optional application bundle path selected in Settings; omitted or `null` disables the Editor action |
 
-Decoding is tolerant: omitted keys fall back to defaults, so configs written by older versions keep loading. Repositories are added and removed with the folder picker in **Settings**, and thresholds are edited there with steppers.
+Decoding is tolerant: omitted keys fall back to defaults, so configs written by older versions keep loading. Repositories are added and removed with the folder picker in **Settings**, thresholds are edited there with steppers, and the Editor application is selected with the application picker.
 
 ## Design decisions and limitations
 

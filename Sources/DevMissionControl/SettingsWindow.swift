@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import DevControlCore
 
 /// Owns the regular settings window (activating, with a standard title bar).
@@ -13,7 +14,7 @@ final class SettingsWindowController {
             let newWindow = NSWindow(contentViewController: hosting)
             newWindow.title = "Mission Control — Settings"
             newWindow.styleMask = [.titled, .closable]
-            newWindow.setContentSize(NSSize(width: 460, height: 520))
+            newWindow.setContentSize(NSSize(width: 460, height: 560))
             newWindow.isReleasedWhenClosed = false
             newWindow.center()
             window = newWindow
@@ -58,6 +59,34 @@ struct SettingsRootView: View {
                     }
                 }
 
+                Section("Editor") {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 1) {
+                            if let editorPath = appState.config.editorApplicationPath {
+                                Text(URL(fileURLWithPath: editorPath).lastPathComponent)
+                                    .font(.callout.weight(.medium))
+                                Text(editorPath)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            } else {
+                                Text("No editor selected")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button("Choose Editor…") { chooseEditor() }
+                        if appState.config.editorApplicationPath != nil {
+                            Button("Clear") { appState.config.editorApplicationPath = nil }
+                        }
+                    }
+                    Text("The Editor action opens the selected worktree in this application.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Scan") {
                     Stepper(value: $appState.config.refreshIntervalMinutes, in: 1...60) {
                         labeled("Refresh every", "\(appState.config.refreshIntervalMinutes) min")
@@ -93,6 +122,18 @@ struct SettingsRootView: View {
             Text(prefix).font(.callout)
             Spacer()
             Text(value).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+        }
+    }
+
+    private func chooseEditor() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Editor Application"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType.applicationBundle]
+        if panel.runModal() == .OK, let url = panel.url {
+            appState.config.editorApplicationPath = url.standardizedFileURL.path
         }
     }
 

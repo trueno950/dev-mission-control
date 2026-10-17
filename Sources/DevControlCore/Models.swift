@@ -62,11 +62,14 @@ public struct AppConfig: Codable, Hashable, Sendable {
     public var stalePRDays: Int
     /// Projects without Engram activity for this many days are flagged.
     public var inactivityDays: Int
+    /// Optional application bundle path used by the worktree Editor action.
+    public var editorApplicationPath: String?
 
     public static let `default` = AppConfig()
 
     private enum CodingKeys: String, CodingKey {
         case repos, refreshIntervalMinutes, staleWorktreeDays, stalePRDays, inactivityDays
+        case editorApplicationPath
     }
 
     /// Tolerant decoding: omitted numeric settings fall back to defaults so a
@@ -83,18 +86,22 @@ public struct AppConfig: Codable, Hashable, Sendable {
             forKey: .stalePRDays) ?? config.stalePRDays
         inactivityDays = try container.decodeIfPresent(Int.self,
             forKey: .inactivityDays) ?? config.inactivityDays
+        editorApplicationPath = try container.decodeIfPresent(String.self,
+            forKey: .editorApplicationPath)
     }
 
     public init(repos: [RepoConfig] = [],
                 refreshIntervalMinutes: Int = 5,
                 staleWorktreeDays: Int = 7,
                 stalePRDays: Int = 7,
-                inactivityDays: Int = 14) {
+                inactivityDays: Int = 14,
+                editorApplicationPath: String? = nil) {
         self.repos = repos
         self.refreshIntervalMinutes = max(1, refreshIntervalMinutes)
         self.staleWorktreeDays = max(1, staleWorktreeDays)
         self.stalePRDays = max(1, stalePRDays)
         self.inactivityDays = max(1, inactivityDays)
+        self.editorApplicationPath = editorApplicationPath
     }
 }
 
@@ -167,6 +174,8 @@ public struct WorktreeInfo: Hashable, Sendable {
     public var ageDays: Int
     /// Nil when git could not read the worktree's last commit timestamp.
     public var lastCommitAt: Date?
+    /// HEAD object ID from `git worktree list --porcelain`, when available.
+    public var headCommit: String?
 
     /// Backward-compatible: true when the worktree has any pending change.
     public var isDirty: Bool { changes.isDirty }
@@ -174,8 +183,9 @@ public struct WorktreeInfo: Hashable, Sendable {
     public var dirtyCount: Int { changes.pendingFiles }
 
     public init(path: String, name: String, isDirty: Bool, ageDays: Int,
-                branch: String? = nil, dirtyCount: Int? = nil,
-                lastCommitAt: Date? = nil, changes: ChangeCounts? = nil) {
+                branch: String? = nil, headCommit: String? = nil,
+                dirtyCount: Int? = nil, lastCommitAt: Date? = nil,
+                changes: ChangeCounts? = nil) {
         self.path = path
         self.name = name
         self.branch = branch
@@ -184,6 +194,7 @@ public struct WorktreeInfo: Hashable, Sendable {
         self.changes = changes ?? ChangeCounts(unstaged: dirtyCount ?? (isDirty ? 1 : 0))
         self.ageDays = ageDays
         self.lastCommitAt = lastCommitAt
+        self.headCommit = headCommit
     }
 }
 
@@ -193,12 +204,30 @@ public struct PRInfo: Hashable, Sendable {
     public var title: String
     public var ageDays: Int
     public var ciFailing: Bool
+    /// Head branch and commit returned by `gh pr list`, used for exact worktree association.
+    public var headRefName: String?
+    public var headRefOid: String?
+    /// Original URL returned by `gh`; only HTTPS URLs are eligible to open.
+    public var url: String?
 
-    public init(number: Int, title: String, ageDays: Int, ciFailing: Bool) {
+    public init(number: Int, title: String, ageDays: Int, ciFailing: Bool,
+                headRefName: String? = nil, headRefOid: String? = nil,
+                url: String? = nil) {
         self.number = number
         self.title = title
         self.ageDays = ageDays
         self.ciFailing = ciFailing
+        self.headRefName = headRefName
+        self.headRefOid = headRefOid
+        self.url = url
+    }
+
+    /// Safe web URL for an open action; never accepts non-HTTPS schemes.
+    public var webURL: URL? {
+        guard let url, let components = URLComponents(string: url),
+              components.scheme?.lowercased() == "https",
+              components.host != nil else { return nil }
+        return components.url
     }
 }
 
