@@ -43,15 +43,29 @@ public struct AttentionItem: Hashable, Sendable, Identifiable {
     }
 }
 
+/// Counts current findings for a dashboard header. Source freshness is shown
+/// separately and is deliberately not counted as an attention notice.
+public struct AttentionSummary: Hashable, Sendable {
+    public let affectedProjects: Int
+    public let notices: Int
+
+    public init(affectedProjects: Int, notices: Int) {
+        self.affectedProjects = affectedProjects
+        self.notices = notices
+    }
+}
+
 /// Pure classification of a repository snapshot into attention items.
 public enum AttentionMath {
     /// Classifies one snapshot. Items are ordered critical first, then
     /// warnings, then infos; within a severity the order is deterministic
-    /// (kind declaration order, then worktree/PR order as given).
+    /// (kind declaration order, then worktree/PR order as given). Messages are
+    /// generated in the requested language, defaulting to the system language.
     public static func classify(_ snapshot: RepoSnapshot,
                                 now: Date,
                                 calendar: Calendar = .current,
-                                thresholds: AppConfig) -> [AttentionItem] {
+                                thresholds: AppConfig,
+                                language: AppLanguage = .current) -> [AttentionItem] {
         var items: [AttentionItem] = []
 
         // Only current reads may establish findings. Failed or stale source
@@ -60,29 +74,42 @@ public enum AttentionMath {
         if snapshot.git.freshness == .current {
             if snapshot.git.changes.conflicts > 0 {
                 let count = snapshot.git.changes.conflicts
-                let branch = snapshot.git.branch ?? "primary checkout"
-                let label = count == 1 ? "merge conflict" : "merge conflicts"
+                let branch = snapshot.git.branch ?? language.pick(es: "checkout principal", en: "primary checkout")
+                let label = language.pick(
+                    es: AppLanguage.plural(count, "conflicto de merge", "conflictos de merge"),
+                    en: AppLanguage.plural(count, "merge conflict", "merge conflicts"))
+                let connector = language.pick(es: "en", en: "on")
                 items.append(AttentionItem(kind: .mergeConflict, severity: .critical,
-                                           message: "\(count) \(label) on \(branch)"))
+                                           message: "\(count) \(label) \(connector) \(branch)"))
             }
 
             if snapshot.git.unpushedCount > 0 {
                 let branch = snapshot.git.branch ?? "HEAD"
+                let message = language.pick(
+                    es: "\(snapshot.git.unpushedCount) commit\(snapshot.git.unpushedCount == 1 ? "" : "s") sin subir en \(branch)",
+                    en: "\(snapshot.git.unpushedCount) unpushed commit\(snapshot.git.unpushedCount == 1 ? "" : "s") on \(branch)")
                 items.append(AttentionItem(kind: .unpushedCommits, severity: .warning,
-                                           message: "\(snapshot.git.unpushedCount) unpushed commit\(snapshot.git.unpushedCount == 1 ? "" : "s") on \(branch)"))
+                                           message: message))
             }
 
             for worktree in snapshot.git.worktrees {
                 if worktree.changes.conflicts > 0 {
                     let count = worktree.changes.conflicts
-                    let label = count == 1 ? "merge conflict" : "merge conflicts"
+                    let label = language.pick(
+                        es: AppLanguage.plural(count, "conflicto de merge", "conflictos de merge"),
+                        en: AppLanguage.plural(count, "merge conflict", "merge conflicts"))
+                    let verb = language.pick(es: "tiene", en: "has")
                     items.append(AttentionItem(kind: .mergeConflict, severity: .critical,
-                                               message: "Worktree \(worktree.name) has \(count) \(label)",
+                                               message: "Worktree \(worktree.name) \(verb) \(count) \(label)",
                                                worktreePath: worktree.path))
                 } else if !snapshot.config.isPaused, !worktree.isDirty,
                           worktree.ageDays > thresholds.staleWorktreeDays {
+                    let age = language.pick(
+                        es: AppLanguage.plural(worktree.ageDays, "1 día", "\(worktree.ageDays) días"),
+                        en: AppLanguage.plural(worktree.ageDays, "1 day", "\(worktree.ageDays) days"))
+                    let state = language.pick(es: "inactivo", en: "idle")
                     items.append(AttentionItem(kind: .staleWorktree, severity: .info,
-                                               message: "Worktree \(worktree.name) idle \(worktree.ageDays) days",
+                                               message: "Worktree \(worktree.name) \(state) \(age)",
                                                worktreePath: worktree.path))
                 }
             }
@@ -92,11 +119,16 @@ public enum AttentionMath {
             for pr in snapshot.pr.prs {
                 if pr.ciFailing {
                     items.append(AttentionItem(kind: .failingCI, severity: .critical,
-                                               message: "PR #\(pr.number) failing CI"))
+                                               message: language.pick(es: "PR #\(pr.number) con checks fallidos",
+                                                                      en: "PR #\(pr.number) failing CI")))
                 }
                 if pr.ageDays > thresholds.stalePRDays {
+                    let age = language.pick(
+                        es: AppLanguage.plural(pr.ageDays, "1 día", "\(pr.ageDays) días"),
+                        en: AppLanguage.plural(pr.ageDays, "1 day", "\(pr.ageDays) days"))
+                    let opened = language.pick(es: "abierta", en: "open")
                     items.append(AttentionItem(kind: .oldOpenPR, severity: .info,
-                                               message: "PR #\(pr.number) open \(pr.ageDays) days"))
+                                               message: "PR #\(pr.number) \(opened) \(age)"))
                 }
             }
         }
@@ -106,12 +138,34 @@ public enum AttentionMath {
            let activity = snapshot.activity.activity {
             let days = daysBetween(activity.date, and: now, calendar: calendar)
             if days > thresholds.inactivityDays {
+                let age = language.pick(
+                    es: AppLanguage.plural(days, "1 día", "\(days) días"),
+                    en: AppLanguage.plural(days, "1 day", "\(days) days"))
                 items.append(AttentionItem(kind: .inactiveProject, severity: .info,
-                                           message: "No Engram activity for \(days) days"))
+                                           message: language.pick(
+                                               es: "Sin actividad de Engram durante \(age)",
+                                               en: "No Engram activity for \(age)")))
             }
         }
 
         return sorted(items)
+    }
+
+    /// Counts projects with at least one current finding and all visible
+    /// findings, including informational notices. Source freshness does not
+    /// contribute to either count.
+    public static func summaryCounts(_ snapshots: [RepoSnapshot],
+                                     now: Date,
+                                     calendar: Calendar = .current,
+                                     thresholds: AppConfig,
+                                     language: AppLanguage = .current) -> AttentionSummary {
+        let items = snapshots.map {
+            classify($0, now: now, calendar: calendar, thresholds: thresholds,
+                     language: language)
+        }
+        return AttentionSummary(
+            affectedProjects: items.filter { !$0.isEmpty }.count,
+            notices: items.reduce(0) { $0 + $1.count })
     }
 
     /// Whether the repository has an actionable warning or critical finding.

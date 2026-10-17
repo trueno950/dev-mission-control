@@ -242,6 +242,19 @@ public struct ActivityInfo: Hashable, Sendable {
     }
 }
 
+/// Most recent saved session summary observed for a project (S19). Sourced
+/// from an observation of type `session_summary` inside a bounded recent
+/// page; a missing summary is never fabricated.
+public struct SessionSummaryInfo: Hashable, Sendable {
+    public var title: String
+    public var date: Date
+
+    public init(title: String, date: Date) {
+        self.title = title
+        self.date = date
+    }
+}
+
 /// Result of scanning one repository with local git.
 public struct GitStatus: Hashable, Sendable {
     public var branch: String?
@@ -341,6 +354,10 @@ public struct PRStatus: Hashable, Sendable {
 /// Result of the Engram activity lookup for one project.
 public struct ActivityStatus: Hashable, Sendable {
     public var activity: ActivityInfo?
+    /// Most recent saved session summary within the scanned page, when found.
+    /// Distinct from connectivity: a recent read does not mean the memory
+    /// reflects the current code (S19).
+    public var summary: SessionSummaryInfo?
     /// Whether the latest Engram read succeeded. False when the server is
     /// unreachable or the request failed.
     public var available: Bool
@@ -357,22 +374,25 @@ public struct ActivityStatus: Hashable, Sendable {
         return available ? .current : .unavailable
     }
 
-    public init(activity: ActivityInfo? = nil, available: Bool = false, error: String? = nil,
+    public init(activity: ActivityInfo? = nil, summary: SessionSummaryInfo? = nil,
+                available: Bool = false, error: String? = nil,
                 lastReadAt: Date? = nil, isStale: Bool = false) {
         self.activity = activity
+        self.summary = summary
         self.available = available
         self.error = error
         self.lastReadAt = lastReadAt
         self.isStale = isStale
     }
 
-    /// S5/S12: when Engram becomes unreachable, keep the last valid activity
-    /// marked stale while still exposing the current failure.
+    /// S5/S19: when Engram becomes unreachable, keep the last valid activity
+    /// and saved summary marked stale while still exposing the current failure.
     public func retainingLastRead(_ previous: ActivityStatus?) -> ActivityStatus {
         guard !available, error != nil, let previous,
               previous.freshness != .unavailable else { return self }
         var retained = self
         retained.activity = previous.activity
+        retained.summary = previous.summary
         retained.lastReadAt = previous.lastReadAt
         retained.isStale = true
         return retained
