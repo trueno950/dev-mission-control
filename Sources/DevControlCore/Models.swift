@@ -11,18 +11,22 @@ public struct RepoConfig: Codable, Hashable, Sendable, Identifiable {
     /// Optional Engram project name. When nil, the repository folder name is used.
     public var engramProject: String?
     public var enabled: Bool
+    /// Explicit user-declared pause; suppresses inactivity notices without
+    /// inferring anything about agent activity from repository files.
+    public var isPaused: Bool
 
     public init(id: String, path: String, githubSlug: String? = nil,
-                engramProject: String? = nil, enabled: Bool = true) {
+                engramProject: String? = nil, enabled: Bool = true, isPaused: Bool = false) {
         self.id = id
         self.path = path
         self.githubSlug = githubSlug
         self.engramProject = engramProject
         self.enabled = enabled
+        self.isPaused = isPaused
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, path, githubSlug, engramProject, enabled
+        case id, path, githubSlug, engramProject, enabled, isPaused
     }
 
     /// Tolerant decoding: new optional keys and omitted booleans fall back to
@@ -34,6 +38,7 @@ public struct RepoConfig: Codable, Hashable, Sendable, Identifiable {
         githubSlug = try container.decodeIfPresent(String.self, forKey: .githubSlug)
         engramProject = try container.decodeIfPresent(String.self, forKey: .engramProject)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        isPaused = try container.decodeIfPresent(Bool.self, forKey: .isPaused) ?? false
     }
 
     /// Folder name of the repository path.

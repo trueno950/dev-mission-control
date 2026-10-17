@@ -4,28 +4,28 @@ A native macOS menu bar app that answers **"where was I and what needs attention
 
 ## What it flags
 
-For each tracked project, Dev Mission Control classifies these attention items (threshold-driven, critical first):
+For each tracked project, Dev Mission Control separates pending local work from actionable attention. The evidence and meaning of each finding are:
 
-| Item | Trigger | Severity |
+| State or finding | Evidence | Meaning |
 | --- | --- | --- |
-| Config error | Repo path missing or not a git repository | critical |
+| In progress | Git reports staged, unstaged, or untracked files in the checkout or a linked worktree | Informational only; it is not evidence that an agent is running and is never urgent by itself |
+| Config error | The configured path is missing or is not a Git repository | critical |
+| Merge conflict | Git reports one or more unmerged entries in the checkout or a linked worktree | critical |
 | Failing CI | An open PR has a failing check | critical |
-| Dirty working tree | Uncommitted files in the main worktree | warning |
-| Unpushed commits | Local commits not pushed to the upstream branch | warning |
-| Dirty worktree `X` | A linked worktree has uncommitted changes | warning |
-| PR `#N` open too long | Open PR older than the PR threshold | warning |
-| Worktree `X` idle too long | Linked worktree whose last commit is older than the worktree threshold | info |
-| No agent activity | Last Engram observation older than the inactivity threshold | info |
+| Unpushed commits | Local commits are ahead of the configured upstream branch | warning |
+| PR `#N` open too long | Open PR is older than the informational threshold | info; age alone is not urgency |
+| Worktree `X` idle too long | A clean linked worktree's last commit is older than the worktree threshold and its project is not paused | info |
+| Engram inactivity | Engram is available and its latest observation is older than the inactivity threshold; project is not paused | info |
 
-Repositories with no findings render as clean rows. Sources that cannot be consulted are surfaced as **"unavailable"** on the card and never fabricate a finding.
+A project is paused only when explicitly configured as paused. Pausing suppresses Engram inactivity and idle-clean-worktree notices; it does not hide conflicts, failing checks, or unpushed commits. File modification dates are not used to infer agent activity. Informational findings do not count as a project needing attention. Sources that cannot be consulted are surfaced as **"unavailable"** and never treated as empty or fabricated results.
 
 ## Data sources
 
 All access is read-only. The app never mutates a repository and stores no credentials.
 
-- **Local git** (`/usr/bin/git`): current branch, `git status --porcelain`, unpushed commit count (`rev-list @{u}..HEAD`), and `git worktree list --porcelain` with each linked worktree's branch, changed-file count, dirty state, and last-commit age.
+- **Local git** (`/usr/bin/git`): primary checkout branch, categorized `git status --porcelain=v1` counts (staged, unstaged, untracked, unmerged conflicts), unpushed commit count (`rev-list @{u}..HEAD`), and `git worktree list --porcelain` with each linked worktree's branch, path, change counts, and last-commit age.
 
-Flagged worktrees show their name, branch (or `detached`), changed-file count, last-commit age, and full path. Use the row actions to reveal a worktree in Finder or copy its path. These actions are read-only: the app never pushes commits or removes worktrees.
+The primary checkout branch is distinct from linked-worktree branches. Pending changes are a repository-state signal, not a claim about agent liveness. Actions remain read-only: the app never commits, pushes, merges, or removes worktrees.
 - **`gh` CLI**: `gh pr list -R <owner/repo> --state open --json number,title,createdAt,statusCheckRollup` for open PR age and CI state. The slug is taken from the config when set, otherwise derived from the `origin` remote.
 - **Engram HTTP API**: `GET http://127.0.0.1:7437/observations?project=<name>&limit=1` for the most recent agent activity of the project.
 
@@ -61,7 +61,7 @@ The logic tests are an executable Swift target with a custom check harness:
 swift run DevControlLogicTests
 ```
 
-It prints `127/127 checks passed` when everything is green.
+It prints a check-count summary when everything is green.
 
 ## Headless mode
 
@@ -91,7 +91,8 @@ The file is created on first save (from the Settings window). Set the `DMC_CONFI
       "path": "/Users/me/Projects/my-project",
       "githubSlug": "owner/my-project",
       "engramProject": "my-project",
-      "enabled": true
+      "enabled": true,
+      "isPaused": false
     }
   ],
   "refreshIntervalMinutes": 5,
@@ -108,9 +109,10 @@ The file is created on first save (from the Settings window). Set the `DMC_CONFI
 | `repos[].githubSlug` | Optional `owner/name`; derived from `origin` when absent |
 | `repos[].engramProject` | Optional Engram project name; defaults to the folder name |
 | `repos[].enabled` | Optional; defaults to `true` when omitted |
+| `repos[].isPaused` | Optional; defaults to `false`; suppresses inactivity and idle-worktree notices |
 | `refreshIntervalMinutes` | Auto-refresh interval (default 5) |
-| `staleWorktreeDays` | Worktree idle threshold in days (default 7) |
-| `stalePRDays` | Open PR age threshold in days (default 7) |
+| `staleWorktreeDays` | Informational threshold for clean idle worktrees (default 7) |
+| `stalePRDays` | Informational open-PR age threshold; age alone is not urgent (default 7) |
 | `inactivityDays` | Engram inactivity threshold in days (default 14) |
 
 Decoding is tolerant: omitted keys fall back to defaults, so configs written by older versions keep loading. Repositories are added and removed with the folder picker in **Settings**, and thresholds are edited there with steppers.

@@ -4,6 +4,7 @@ import Foundation
 public struct AttentionItem: Hashable, Sendable, Identifiable {
     public enum Kind: Hashable, Sendable {
         case configError
+        case mergeConflict
         case dirtyFiles
         case unpushedCommits
         case staleWorktree
@@ -60,9 +61,12 @@ public enum AttentionMath {
             return sorted(items)
         }
 
-        if snapshot.git.dirtyCount > 0 {
-            items.append(AttentionItem(kind: .dirtyFiles, severity: .warning,
-                                       message: "\(snapshot.git.dirtyCount) uncommitted file\(snapshot.git.dirtyCount == 1 ? "" : "s")"))
+        if snapshot.git.changes.conflicts > 0 {
+            let count = snapshot.git.changes.conflicts
+            let branch = snapshot.git.branch ?? "primary checkout"
+            let label = count == 1 ? "merge conflict" : "merge conflicts"
+            items.append(AttentionItem(kind: .mergeConflict, severity: .critical,
+                                       message: "\(count) \(label) on \(branch)"))
         }
 
         if snapshot.git.unpushedCount > 0 {
@@ -72,11 +76,14 @@ public enum AttentionMath {
         }
 
         for worktree in snapshot.git.worktrees {
-            if worktree.isDirty {
-                items.append(AttentionItem(kind: .staleWorktree, severity: .warning,
-                                           message: "Worktree \(worktree.name) has uncommitted changes",
+            if worktree.changes.conflicts > 0 {
+                let count = worktree.changes.conflicts
+                let label = count == 1 ? "merge conflict" : "merge conflicts"
+                items.append(AttentionItem(kind: .mergeConflict, severity: .critical,
+                                           message: "Worktree \(worktree.name) has \(count) \(label)",
                                            worktreePath: worktree.path))
-            } else if worktree.ageDays > thresholds.staleWorktreeDays {
+            } else if !snapshot.config.isPaused, !worktree.isDirty,
+                      worktree.ageDays > thresholds.staleWorktreeDays {
                 items.append(AttentionItem(kind: .staleWorktree, severity: .info,
                                            message: "Worktree \(worktree.name) idle \(worktree.ageDays) days",
                                            worktreePath: worktree.path))
@@ -89,25 +96,27 @@ public enum AttentionMath {
                                            message: "PR #\(pr.number) failing CI"))
             }
             if pr.ageDays > thresholds.stalePRDays {
-                items.append(AttentionItem(kind: .oldOpenPR, severity: .warning,
+                items.append(AttentionItem(kind: .oldOpenPR, severity: .info,
                                            message: "PR #\(pr.number) open \(pr.ageDays) days"))
             }
         }
 
-        if snapshot.activity.available, let activity = snapshot.activity.activity {
+        if !snapshot.config.isPaused,
+           snapshot.activity.available, let activity = snapshot.activity.activity {
             let days = daysBetween(activity.date, and: now, calendar: calendar)
             if days > thresholds.inactivityDays {
                 items.append(AttentionItem(kind: .inactiveProject, severity: .info,
-                                           message: "No agent activity for \(days) days"))
+                                           message: "No Engram activity for \(days) days"))
             }
         }
 
         return sorted(items)
     }
 
-    /// Whether the badge should count this repository.
+    /// Whether the repository has an actionable warning or critical finding.
+    /// Informational age notices do not count as a project needing attention.
     public static func needsAttention(_ items: [AttentionItem]) -> Bool {
-        !items.isEmpty
+        items.contains { $0.severity > .info }
     }
 
     // MARK: - Helpers

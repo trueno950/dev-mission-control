@@ -8,9 +8,9 @@ S1: "un segundo widget con la misma base: un 'Mission Control' de desarrollo en 
 
 S2: Data sources per project, read-only and official only: local `git` (current branch, dirty file count, unpushed commit count, worktree list), `gh` CLI (open PRs with CI check status), Engram HTTP API (`GET /observations?project=<name>&limit=1` for last activity; server `http://127.0.0.1:7437`). No scraping, no mutations of user repos.
 
-S3: Attention classification (pure logic, threshold-driven): uncommitted local changes are informational and do not create an attention finding; verified conflicts and failing checks require attention; unpushed commits remain an evidence-based finding; PR age alone is informational and does not establish urgency; inactivity is based only on Engram activity data and is suppressed for explicitly paused projects. A dirty worktree does not imply agent activity. This supersedes the previous dirty-worktree warning and age-only PR warning rules. Existing thresholds remain configurable for any informational age display.
+S3: Attention classification (pure logic, threshold-driven): uncommitted local changes are informational and do not create an attention finding; verified conflicts and failing checks require attention; unpushed commits remain an evidence-based finding; PR age and clean-worktree age are informational and do not establish urgency. Agent inactivity is sourced only from Engram, never inferred from Git or file timestamps. Explicitly paused projects receive neither Engram inactivity nor idle-clean-worktree notices. This supersedes the previous dirty-worktree warning and age-only PR warning rules. Existing thresholds remain configurable for any informational age display.
 
-S4: Configuration persisted as JSON in Application Support (`~/Library/Application Support/DevMissionControl/config.json`): repo list (absolute path; GitHub slug and Engram project name optional, derived when absent), refresh interval (default 5 min), thresholds, and an optional per-repository paused state defaulting to false. The settings window can pause or resume a project; paused projects receive no inactivity findings. Existing configuration remains backward-compatible.
+S4: Configuration persisted as JSON in Application Support (`~/Library/Application Support/DevMissionControl/config.json`): repo list (absolute path; GitHub slug and Engram project name optional, derived when absent), refresh interval (default 5 min), thresholds, and optional per-repository `isPaused` defaulting to false. The settings window can pause or resume a project; paused projects receive no inactivity findings. Existing configuration remains backward-compatible.
 
 S5: Graceful degradation: without `gh` (missing or unauthenticated) do not fabricate an empty PR result; without the Engram server do not fabricate activity; missing/invalid repo path renders an explicit config-error row instead of crashing. Each source reports its identity, last read time, availability, and freshness. If a refresh fails after a successful read, retain the last valid result marked stale and separately show the current source failure. Git remains queryable if GitHub or Engram fails.
 
@@ -42,8 +42,8 @@ T3 [S2,S5] Git scanner: porcelain parsers for status/worktree list/branch/upstre
 T4 [S2,S5] GitHub scanner: origin-URL slug parsing + `gh pr list --json` parsing (open PR age, failing CI) with injected-output tests; graceful absence.
 T5 [S2,S5,S6] Engram scanner (HTTP GET, per-project last activity) with response-parsing tests; aggregate scan pipeline and background refresh loop in AppState.
 T6 [S1,S7,S4] Full panel UI (per-project cards, attention rows, clean state, config-error rows), settings window with folder picker, README, final functional verification (build, launch, manual smoke on real repos).
-T7 [S9,S13] Normalize Git status per checkout/worktree (staged, unstaged, untracked, conflicts) with parser tests — worker, in progress; commit: pending.
-T8 [S9,S13] Implement evidence-based attention classification and backward-compatible paused-project config; test pause suppression and non-urgent pending changes — inline; commit: pending.
+T7 [S9,S13] Normalize Git status per checkout/worktree (staged, unstaged, untracked, conflicts) with parser tests — worker, done; commit: 8024cbe.
+T8 [S9,S13] Implement evidence-based attention classification and backward-compatible paused-project config; test pause suppression and non-urgent pending changes; document evidence rules — inline, in progress; commit: pending.
 T9 [S5,S6,S12,S13] Add source timestamps/freshness, bounded non-overlapping scans, and last-good stale retention without losing Git when remote sources fail — inline; commit: pending.
 T10 [S11,S12,S13] Implement argument-safe worktree actions and verified worktree-to-PR mapping; test paths containing spaces and keep all operations read-only — inline; commit: pending.
 T11 [S10,S12,S13] Implement compact expandable repository cards, accurate project/notice counts, per-source freshness, pause controls, README updates, and end-to-end acceptance checks — inline; commit: pending.
@@ -153,3 +153,5 @@ También evitaría depender del texto decorado de la terminal: primero buscar sa
 Voy a dejarte el encargo en un bloque de texto listo para copiar, usando la función de borradores.”
 
 L7 (decision): “También cambiaría en el prompt ‘cambios locales recientes’ por ‘cambios locales pendientes’ para eliminar la ambigüedad. sin umbral”.
+
+L8 (implementation interpretation): A paused project suppresses both Engram inactivity and informational idle-clean-worktree notices; the latter is based only on last commit age and never implies agent activity.
