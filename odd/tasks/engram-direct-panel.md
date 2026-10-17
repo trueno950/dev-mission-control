@@ -20,6 +20,16 @@ S6 (language, carried over): interface language follows the system (`es*` → Sp
 
 S7 (TUI): `engram tui` stays reachable as a secondary action, labelled honestly as global and slow; measured ~5.6 s to leave "Loading stats..." on the current data volume.
 
+## Delivery strategy
+
+Stacked PR chain against the verified default branch (`main`), sliced by layer, because the first slice already passed the ~400-authored-line review guideline and the destination repository documents no issue-first policy (no `.github/`, no `type:*` labels). Slices:
+
+- Slice A (T16 core): commits `3c30ca0` (models, parsers, resolver, request builder) and `e143669` (client reads, retake composer) — 993 authored lines including this document; boundary recorded when the slice reminder fired at T16.
+- Slice B (T17–T20 panel UI): the Engram panel window, search, retake-context copy, and sessions browsing.
+- Slice C (T21): README, preview build, and acceptance checks.
+
+Each PR is opened against its parent slice and retargeted to `main` immediately before its own merge, as in the previous delivery. Native review, when due, runs on the committed slice candidate with the lenses that match that slice.
+
 ## Tasks
 
 T16 [S3,S4] Core: read-only Engram panel client, response parsers, project resolver, per-read freshness, request builder, retake-context composer + tests — inline; commits `3c30ca0` (models, parsers, resolver, request builder) and `ea97a09` (client reads, retake composer).
