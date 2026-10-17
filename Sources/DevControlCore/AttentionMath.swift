@@ -59,11 +59,13 @@ public struct AttentionSummary: Hashable, Sendable {
 public enum AttentionMath {
     /// Classifies one snapshot. Items are ordered critical first, then
     /// warnings, then infos; within a severity the order is deterministic
-    /// (kind declaration order, then worktree/PR order as given).
+    /// (kind declaration order, then worktree/PR order as given). Messages are
+    /// generated in the requested language, defaulting to the system language.
     public static func classify(_ snapshot: RepoSnapshot,
                                 now: Date,
                                 calendar: Calendar = .current,
-                                thresholds: AppConfig) -> [AttentionItem] {
+                                thresholds: AppConfig,
+                                language: AppLanguage = .current) -> [AttentionItem] {
         var items: [AttentionItem] = []
 
         // Only current reads may establish findings. Failed or stale source
@@ -72,29 +74,42 @@ public enum AttentionMath {
         if snapshot.git.freshness == .current {
             if snapshot.git.changes.conflicts > 0 {
                 let count = snapshot.git.changes.conflicts
-                let branch = snapshot.git.branch ?? "checkout principal"
-                let label = count == 1 ? "conflicto de merge" : "conflictos de merge"
+                let branch = snapshot.git.branch ?? language.pick(es: "checkout principal", en: "primary checkout")
+                let label = language.pick(
+                    es: AppLanguage.plural(count, "conflicto de merge", "conflictos de merge"),
+                    en: AppLanguage.plural(count, "merge conflict", "merge conflicts"))
+                let connector = language.pick(es: "en", en: "on")
                 items.append(AttentionItem(kind: .mergeConflict, severity: .critical,
-                                           message: "\(count) \(label) en \(branch)"))
+                                           message: "\(count) \(label) \(connector) \(branch)"))
             }
 
             if snapshot.git.unpushedCount > 0 {
                 let branch = snapshot.git.branch ?? "HEAD"
+                let message = language.pick(
+                    es: "\(snapshot.git.unpushedCount) commit\(snapshot.git.unpushedCount == 1 ? "" : "s") sin subir en \(branch)",
+                    en: "\(snapshot.git.unpushedCount) unpushed commit\(snapshot.git.unpushedCount == 1 ? "" : "s") on \(branch)")
                 items.append(AttentionItem(kind: .unpushedCommits, severity: .warning,
-                                           message: "\(snapshot.git.unpushedCount) commit\(snapshot.git.unpushedCount == 1 ? "" : "s") sin subir en \(branch)"))
+                                           message: message))
             }
 
             for worktree in snapshot.git.worktrees {
                 if worktree.changes.conflicts > 0 {
                     let count = worktree.changes.conflicts
-                    let label = count == 1 ? "conflicto de merge" : "conflictos de merge"
+                    let label = language.pick(
+                        es: AppLanguage.plural(count, "conflicto de merge", "conflictos de merge"),
+                        en: AppLanguage.plural(count, "merge conflict", "merge conflicts"))
+                    let verb = language.pick(es: "tiene", en: "has")
                     items.append(AttentionItem(kind: .mergeConflict, severity: .critical,
-                                               message: "Worktree \(worktree.name) tiene \(count) \(label)",
+                                               message: "Worktree \(worktree.name) \(verb) \(count) \(label)",
                                                worktreePath: worktree.path))
                 } else if !snapshot.config.isPaused, !worktree.isDirty,
                           worktree.ageDays > thresholds.staleWorktreeDays {
+                    let age = language.pick(
+                        es: AppLanguage.plural(worktree.ageDays, "1 día", "\(worktree.ageDays) días"),
+                        en: AppLanguage.plural(worktree.ageDays, "1 day", "\(worktree.ageDays) days"))
+                    let state = language.pick(es: "inactivo", en: "idle")
                     items.append(AttentionItem(kind: .staleWorktree, severity: .info,
-                                               message: "Worktree \(worktree.name) inactivo \(worktree.ageDays) \(worktree.ageDays == 1 ? "día" : "días")",
+                                               message: "Worktree \(worktree.name) \(state) \(age)",
                                                worktreePath: worktree.path))
                 }
             }
@@ -104,11 +119,16 @@ public enum AttentionMath {
             for pr in snapshot.pr.prs {
                 if pr.ciFailing {
                     items.append(AttentionItem(kind: .failingCI, severity: .critical,
-                                               message: "PR #\(pr.number) con checks fallidos"))
+                                               message: language.pick(es: "PR #\(pr.number) con checks fallidos",
+                                                                      en: "PR #\(pr.number) failing CI")))
                 }
                 if pr.ageDays > thresholds.stalePRDays {
+                    let age = language.pick(
+                        es: AppLanguage.plural(pr.ageDays, "1 día", "\(pr.ageDays) días"),
+                        en: AppLanguage.plural(pr.ageDays, "1 day", "\(pr.ageDays) days"))
+                    let opened = language.pick(es: "abierta", en: "open")
                     items.append(AttentionItem(kind: .oldOpenPR, severity: .info,
-                                               message: "PR #\(pr.number) abierta \(pr.ageDays) \(pr.ageDays == 1 ? "día" : "días")"))
+                                               message: "PR #\(pr.number) \(opened) \(age)"))
                 }
             }
         }
@@ -118,8 +138,13 @@ public enum AttentionMath {
            let activity = snapshot.activity.activity {
             let days = daysBetween(activity.date, and: now, calendar: calendar)
             if days > thresholds.inactivityDays {
+                let age = language.pick(
+                    es: AppLanguage.plural(days, "1 día", "\(days) días"),
+                    en: AppLanguage.plural(days, "1 day", "\(days) days"))
                 items.append(AttentionItem(kind: .inactiveProject, severity: .info,
-                                           message: "Sin actividad de Engram durante \(days) \(days == 1 ? "día" : "días")"))
+                                           message: language.pick(
+                                               es: "Sin actividad de Engram durante \(age)",
+                                               en: "No Engram activity for \(age)")))
             }
         }
 
@@ -132,9 +157,11 @@ public enum AttentionMath {
     public static func summaryCounts(_ snapshots: [RepoSnapshot],
                                      now: Date,
                                      calendar: Calendar = .current,
-                                     thresholds: AppConfig) -> AttentionSummary {
+                                     thresholds: AppConfig,
+                                     language: AppLanguage = .current) -> AttentionSummary {
         let items = snapshots.map {
-            classify($0, now: now, calendar: calendar, thresholds: thresholds)
+            classify($0, now: now, calendar: calendar, thresholds: thresholds,
+                     language: language)
         }
         return AttentionSummary(
             affectedProjects: items.filter { !$0.isEmpty }.count,

@@ -58,7 +58,7 @@ func attentionMathTests() {
 
     do {
         let items = AttentionMath.classify(snapshot(), now: sharedNow, calendar: cal,
-                                           thresholds: sharedThresholds)
+                                           thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "clean repo produces no attention items")
         check(!AttentionMath.needsAttention(items), "clean repo does not need attention")
     }
@@ -68,7 +68,7 @@ func attentionMathTests() {
     do {
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(branch: "main", dirtyCount: 3)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "pending checkout changes do not create an attention finding")
         check(!AttentionMath.needsAttention(items), "pending checkout changes are not urgent")
     }
@@ -78,7 +78,7 @@ func attentionMathTests() {
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(worktrees: [WorktreeInfo(path: "/r/w", name: "w",
                 isDirty: true, ageDays: 1, changes: changes)])),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "pending worktree changes do not create an attention finding")
         check(!AttentionMath.needsAttention(items), "pending worktree changes are not urgent")
     }
@@ -88,7 +88,7 @@ func attentionMathTests() {
     do {
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(branch: "feat/x", unpushedCount: 2)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         checkEqual(items.first?.kind, .unpushedCommits, "unpushed item kind")
         checkEqual(items.first?.message, "2 commits sin subir en feat/x", "unpushed message names branch")
     }
@@ -100,7 +100,7 @@ func attentionMathTests() {
         let young = WorktreeInfo(path: "/r/.atl/final-130", name: "final-130", isDirty: false, ageDays: 2)
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(worktrees: [young, old])),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         checkEqual(items.count, 1, "only stale clean worktree flagged")
         checkEqual(items.first?.message, "Worktree final-127 inactivo 9 días", "stale worktree message")
         checkEqual(items.first?.severity, .info, "stale clean worktree is info")
@@ -112,7 +112,7 @@ func attentionMathTests() {
                                       ageDays: 1, changes: ChangeCounts(conflicts: 2))
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(worktrees: [conflicted])),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         checkEqual(items.count, 1, "conflicted worktree creates one finding")
         checkEqual(items.first?.kind, .mergeConflict, "conflicted worktree kind")
         checkEqual(items.first?.severity, .critical, "conflict requires attention")
@@ -123,7 +123,7 @@ func attentionMathTests() {
     do {
         let conflicted = GitStatus(branch: "main", changes: ChangeCounts(conflicts: 1))
         let items = AttentionMath.classify(snapshot(git: conflicted), now: sharedNow,
-                                           calendar: cal, thresholds: sharedThresholds)
+                                           calendar: cal, thresholds: sharedThresholds, language: .spanish)
         checkEqual(items.first?.kind, .mergeConflict, "primary checkout conflict is detected")
         checkEqual(items.first?.severity, .critical, "primary checkout conflict requires attention")
     }
@@ -132,7 +132,7 @@ func attentionMathTests() {
         let edge = WorktreeInfo(path: "/r/.atl/w", name: "w", isDirty: false, ageDays: 7)
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(worktrees: [edge])),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "worktree at exact threshold is not stale")
     }
 
@@ -142,7 +142,7 @@ func attentionMathTests() {
         let failing = PRInfo(number: 14, title: "Fix", ageDays: 2, ciFailing: true)
         let items = AttentionMath.classify(
             snapshot(pr: PRStatus(prs: [failing], available: true)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         checkEqual(items.count, 1, "failing CI flagged")
         checkEqual(items.first?.kind, .failingCI, "failing CI kind")
         checkEqual(items.first?.severity, .critical, "failing CI severity")
@@ -153,7 +153,7 @@ func attentionMathTests() {
         let old = PRInfo(number: 8, title: "Feature", ageDays: 10, ciFailing: false)
         let items = AttentionMath.classify(
             snapshot(pr: PRStatus(prs: [old], available: true)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         checkEqual(items.count, 1, "old PR flagged")
         checkEqual(items.first?.kind, .oldOpenPR, "old PR kind")
         checkEqual(items.first?.severity, .info, "PR age alone is informational")
@@ -166,7 +166,7 @@ func attentionMathTests() {
             available: false, error: "gh unavailable", lastReadAt: date(2026, 10, 15), isStale: true)
         let items = AttentionMath.classify(
             snapshot(pr: staleFailure), now: sharedNow, calendar: cal,
-            thresholds: sharedThresholds)
+            thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "stale failing CI is not presented as a current finding")
         check(!AttentionMath.needsAttention(items), "stale checks alone do not require current attention")
     }
@@ -175,7 +175,7 @@ func attentionMathTests() {
         let both = PRInfo(number: 8, title: "Feature", ageDays: 10, ciFailing: true)
         let items = AttentionMath.classify(
             snapshot(pr: PRStatus(prs: [both], available: true)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         checkEqual(items.count, 2, "failing and old PR yield both items")
         checkEqual(items.first?.kind, .failingCI, "critical item sorts first")
         checkEqual(items.last?.severity, .info, "old PR remains informational alongside failure")
@@ -188,7 +188,7 @@ func attentionMathTests() {
         let stale = ActivityInfo(title: "old session", date: date(2026, 9, 20))
         let items = AttentionMath.classify(
             snapshot(activity: ActivityStatus(activity: stale, available: true)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         checkEqual(items.count, 1, "inactive project flagged")
         checkEqual(items.first?.kind, .inactiveProject, "inactivity kind")
         checkEqual(items.first?.message, "Sin actividad de Engram durante 26 días", "inactivity message names its source")
@@ -199,7 +199,7 @@ func attentionMathTests() {
         let stale = ActivityInfo(title: "old session", date: date(2026, 9, 20))
         let items = AttentionMath.classify(
             snapshot(activity: ActivityStatus(activity: stale, available: true), isPaused: true),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "paused project suppresses Engram inactivity notice")
     }
 
@@ -207,7 +207,7 @@ func attentionMathTests() {
         let oldWorktree = WorktreeInfo(path: "/r/.atl/old", name: "old", isDirty: false, ageDays: 20)
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(worktrees: [oldWorktree]), isPaused: true),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "paused project suppresses idle-clean-worktree notice")
     }
 
@@ -215,21 +215,21 @@ func attentionMathTests() {
         let recent = ActivityInfo(title: "recent", date: date(2026, 10, 14))
         let items = AttentionMath.classify(
             snapshot(activity: ActivityStatus(activity: recent, available: true)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "recently active project not flagged")
     }
 
     do {
         let items = AttentionMath.classify(
             snapshot(activity: ActivityStatus(activity: nil, available: false)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "unavailable Engram source fabricates no finding")
     }
 
     do {
         let items = AttentionMath.classify(
             snapshot(activity: ActivityStatus(activity: nil, available: true)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "project with no Engram data at all is not flagged")
     }
 
@@ -238,7 +238,7 @@ func attentionMathTests() {
     do {
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(error: "Repository path not found: /tmp/gone")),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "a Git source error is represented as no information, not a finding")
         check(!AttentionMath.needsAttention(items), "a Git source error is not falsely urgent")
     }
@@ -248,7 +248,7 @@ func attentionMathTests() {
         let items = AttentionMath.classify(
             snapshot(git: GitStatus(error: "git timed out"),
                     pr: PRStatus(prs: [failing], available: true)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         checkEqual(items.count, 1, "a Git failure does not hide an independent current check")
         checkEqual(items.first?.kind, .failingCI,
                    "current GitHub evidence remains actionable when Git is unavailable")
@@ -264,7 +264,7 @@ func attentionMathTests() {
             lastReadAt: date(2026, 10, 15), isStale: true)
         let items = AttentionMath.classify(
             snapshot(git: staleGit, activity: staleActivity),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.isEmpty, "stale Git conflicts and Engram activity do not create current findings")
     }
 
@@ -276,7 +276,7 @@ func attentionMathTests() {
                            worktrees: [WorktreeInfo(path: "/r/.atl/w", name: "w", isDirty: false, ageDays: 30)]),
             pr: PRStatus(prs: [PRInfo(number: 5, title: "T", ageDays: 1, ciFailing: true)], available: true))
         let items = AttentionMath.classify(snap, now: sharedNow, calendar: cal,
-                                           thresholds: sharedThresholds)
+                                           thresholds: sharedThresholds, language: .spanish)
         checkEqual(items.map { $0.severity }, [.critical, .warning, .info],
                    "items sort critical, warning, then information")
         checkEqual(items[1].message, "1 commit sin subir en main", "evidence-based warning is retained")
@@ -307,11 +307,53 @@ func attentionMathTests() {
                 activity: ActivityStatus(available: false, error: "Engram unavailable"))
         ]
         let summary = AttentionMath.summaryCounts(
-            snapshots, now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            snapshots, now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         checkEqual(summary.affectedProjects, 2,
                    "dashboard count includes only projects with visible findings")
         checkEqual(summary.notices, 5,
                    "dashboard notice count matches all visible findings including info")
+    }
+
+    // MARK: Localized attention messages (system-language support)
+
+    do {
+        let conflicted = WorktreeInfo(path: "/r/.atl/prop-139", name: "prop-139", isDirty: true,
+                                      ageDays: 1, changes: ChangeCounts(conflicts: 2))
+        let items = AttentionMath.classify(
+            snapshot(git: GitStatus(worktrees: [conflicted])),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .english)
+        checkEqual(items.first?.message, "Worktree prop-139 has 2 merge conflicts",
+                   "english worktree conflict message")
+    }
+
+    do {
+        let items = AttentionMath.classify(
+            snapshot(git: GitStatus(branch: "main", unpushedCount: 1)),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .english)
+        checkEqual(items.first?.message, "1 unpushed commit on main",
+                   "english unpushed message")
+    }
+
+    do {
+        let items = AttentionMath.classify(
+            snapshot(pr: PRStatus(prs: [PRInfo(number: 14, title: "Fix", ageDays: 2, ciFailing: true)],
+                                  available: true)),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .english)
+        checkEqual(items.first?.message, "PR #14 failing CI", "english failing CI message")
+    }
+
+    do {
+        let stale = ActivityInfo(title: "old", date: date(2026, 9, 20))
+        let items = AttentionMath.classify(
+            snapshot(activity: ActivityStatus(activity: stale, available: true)),
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .english)
+        checkEqual(items.first?.message, "No Engram activity for 26 days",
+                   "english inactivity message")
+    }
+
+    do {
+        check(AppLanguage.current == .spanish || AppLanguage.current == .english,
+              "system language resolves to a supported language")
     }
 
     // MARK: Severity comparable

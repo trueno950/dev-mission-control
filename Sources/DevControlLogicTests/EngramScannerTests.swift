@@ -99,7 +99,7 @@ func engramScannerTests() {
         let activity = ActivityInfo(title: "x", date: Date(timeIntervalSince1970: 0))
         let items = AttentionMath.classify(
             snapshot(activity: ActivityStatus(activity: activity, available: true)),
-            now: sharedNow, calendar: cal, thresholds: sharedThresholds)
+            now: sharedNow, calendar: cal, thresholds: sharedThresholds, language: .spanish)
         check(items.first?.kind == .inactiveProject, "epoch-dated activity flags inactivity")
     }
 
