@@ -233,5 +233,72 @@ func engramPanelClientTests() {
               "available context never claims there is no information")
     }
 
+    do {
+        // A Git read that failed carries no verified counters, so the composer
+        // must not print a branch or counters as if they had been read (S5).
+        let failedGit = GitStatus(
+            branch: "main",
+            unpushedCount: 5,
+            worktrees: [WorktreeInfo(path: "/r/w", name: "w", isDirty: true, ageDays: 1)],
+            error: "git failed",
+            changes: ChangeCounts(staged: 9, unstaged: 8, untracked: 7))
+        checkEqual(failedGit.freshness, .unavailable, "the failed Git fixture is unavailable")
+        let composed = RetakeContext.compose(
+            repoName: "demo-repo", repoPath: "/Users/x/Projects/demo-repo",
+            git: failedGit, engramProject: "dev-mission-control",
+            context: composerContext, language: .english, now: composerNow)
+        check(composed.contains("## Current Git state"),
+              "a failed Git read keeps its section")
+        check(composed.contains("No information available."),
+              "a failed Git read states there is no information")
+        check(composed.contains("Error: git failed"),
+              "a failed Git read exposes the read error")
+        check(!composed.contains("Staged: 9"),
+              "a failed Git read never prints staged counters")
+        check(!composed.contains("Unstaged: 8"),
+              "a failed Git read never prints unstaged counters")
+        check(!composed.contains("Branch: main"),
+              "a failed Git read never prints a branch")
+        check(!composed.contains("Worktrees: 1"),
+              "a failed Git read never prints worktree counts")
+    }
+
+    do {
+        // A stale Git value is retained but not current, so the same honesty
+        // rule applies: its counters are never presented as freshly read (S5).
+        let staleGit = GitStatus(
+            branch: "main",
+            unpushedCount: 5, error: "git failed",
+            changes: ChangeCounts(staged: 9, unstaged: 8, untracked: 7),
+            lastReadAt: composerNow, isStale: true)
+        checkEqual(staleGit.freshness, .stale, "the stale Git fixture is stale")
+        let composed = RetakeContext.compose(
+            repoName: "demo-repo", repoPath: "/Users/x/Projects/demo-repo",
+            git: staleGit, engramProject: "dev-mission-control",
+            context: composerContext, language: .spanish, now: composerNow)
+        check(composed.contains("## Estado actual de Git"),
+              "a stale Git read keeps its section")
+        check(composed.contains("Sin información."),
+              "a stale Git read states there is no information")
+        check(composed.contains("Error: git failed"),
+              "a stale Git read exposes the read error")
+        check(!composed.contains("Staged: 9"),
+              "a stale Git read never prints staged counters")
+        check(!composed.contains("Rama: main"),
+              "a stale Git read never prints a branch")
+    }
+
+    do {
+        // Preserve the previous behavior for a current Git read: the honesty
+        // rule only applies to reads that are not current.
+        let composed = RetakeContext.compose(
+            repoName: "demo-repo", repoPath: "/Users/x/Projects/demo-repo",
+            git: composerGit, engramProject: "dev-mission-control",
+            context: composerContext, language: .english, now: composerNow)
+        check(composed.contains("Branch: main"), "a current Git read still prints its branch")
+        check(composed.contains("Staged: 1"), "a current Git read still prints its counters")
+        check(composed.contains("Worktrees: 1"), "a current Git read still prints its worktrees")
+    }
+
     StubURLProtocol.respond = nil
 }
