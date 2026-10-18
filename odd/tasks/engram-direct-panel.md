@@ -57,3 +57,6 @@ L3 (native review of the feature: three lineages, two bounded corrections, appro
 Facade defect (maintainer follow-up): the provider's correction-plan slot is unreachable from the Pi facade. `gentle_review_capture` rejected the exact serialized `review.capture-correction-plan` binding that bound STATUS re-offered identically — `collectBinding is missing or stale for current STATUS` — on both correction rounds and also with an explicit `workspaceRoot`. Both parked lineages were therefore abandoned with audited `operator_disposition` records (quarantines `review-715bf09f607410dc-710081529` and `review-a802a5a2630b3d25-1527672535`), and each correction was carried by a fresh lineage instead.
 
 Delivery as it stands: the stacked chain is PR #4 (core), PR #5 (panel UI), PR #6 (docs) and PR #7 (`fix/engram-panel-project-pinning`, both corrections and this record); merges remain the owner's decision.
+
+
+L4 (merges): the chain was integrated into `main` in order, each child retargeted to `main` immediately before its own merge and re-checked MERGEABLE/CLEAN: PR #4 → `8737d80`, PR #5 → `0e912b3`, PR #6 → `2e5a146`, PR #7 → `1a62262`; local `main` was fast-forwarded to the last merge and all four slice branches were deleted locally and remotely. The merged tree carries the whole feature plus both review corrections and this record.
