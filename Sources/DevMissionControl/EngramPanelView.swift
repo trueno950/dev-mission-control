@@ -210,7 +210,8 @@ final class EngramPanelState: ObservableObject {
 
         // A different project means every retained value belongs to the old
         // one: drop them instead of showing mixed data (S5).
-        if let previous = projectName, previous != project {
+        let projectChanged = projectName != nil && projectName != project
+        if projectChanged {
             statsRead = nil
             memoriesRead = nil
             sessionsRead = nil
@@ -230,6 +231,13 @@ final class EngramPanelState: ObservableObject {
         statsRead = newStats.retainingLastRead(statsRead)
         memoriesRead = newMemories.retainingLastRead(memoriesRead)
         sessionsRead = newSessions.retainingLastRead(sessionsRead)
+
+        // A project change drops the search source; an active query is
+        // re-issued for the new project so its section never stays on the
+        // searching state with no request in flight (S2/S5).
+        if projectChanged && isSearchActive {
+            await runSearch()
+        }
     }
 
     // MARK: - Search (S2)
@@ -278,7 +286,12 @@ final class EngramPanelState: ObservableObject {
         // flight, so its reply is discarded (S4/S5; the spinner is left to the
         // request that is current).
         guard searchRequestID == requestID, issuedSearchQuery == query,
-              normalizedSearchQuery == query, project == resolvedProject else { return }
+              normalizedSearchQuery == query, project == resolvedProject else {
+            // A discarded reply must not leave the spinner running; when no
+            // newer request took over, this one clears it (S2/S5).
+            if searchRequestID == requestID { isSearching = false }
+            return
+        }
         isSearching = false
         // Only a value read for the same query may be retained; hits from an
         // earlier query are never displayed under this one (S5).
@@ -346,7 +359,13 @@ final class EngramPanelState: ObservableObject {
         // project's context under this repository's name (S4/S5).
         let project = resolvedProject
         let newContext = await client.context(project: project)
-        guard project == resolvedProject else { return }
+        guard project == resolvedProject else {
+            // Nothing from the old project is copied, and the discarded action
+            // says so instead of failing silently (S2/S5).
+            showCopyNotice(L10n.t("El proyecto cambió; volvé a intentar",
+                                  "The project changed; try again"))
+            return
+        }
         let applied = newContext.retainingLastRead(contextRead)
         contextRead = applied
         let composed = RetakeContext.compose(
@@ -355,7 +374,12 @@ final class EngramPanelState: ObservableObject {
             language: L10n.lang, now: Date())
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(composed, forType: .string)
-        copyConfirmation = L10n.t("Copiado", "Copied")
+        showCopyNotice(L10n.t("Copiado", "Copied"))
+    }
+
+    /// Shows a transient copy notice and clears it shortly after (S2).
+    private func showCopyNotice(_ text: String) {
+        copyConfirmation = text
         copyConfirmationTask?.cancel()
         copyConfirmationTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
