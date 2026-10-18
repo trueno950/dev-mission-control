@@ -300,5 +300,32 @@ func engramPanelClientTests() {
         check(composed.contains("Worktrees: 1"), "a current Git read still prints its worktrees")
     }
 
+    do {
+        // The transport error path (no HTTP response at all, rather than a
+        // non-200 status): the read is unavailable with an error and never an
+        // empty success, and a previous good value is retained marked stale
+        // (S3/S5). The stub fails the request while no responder is installed.
+        StubURLProtocol.respond = nil
+        let client = stubEngramClient()
+        let read = runAsync { await client.memories(project: "dev-mission-control", limit: 5) }
+        checkEqual(read.available, false, "a transport failure is not available")
+        check(read.value == nil, "a transport failure yields no value")
+        check(read.error != nil, "a transport failure exposes its error")
+        checkEqual(read.freshness, .unavailable,
+                   "a transport failure without a prior value is unavailable")
+
+        let previous = EngramRead<[EngramMemory]>(
+            value: [EngramMemory(id: 1, type: "decision", title: "kept",
+                                 content: "kept content", createdAt: nil, updatedAt: nil)],
+            available: true, error: nil, lastReadAt: composerNow)
+        let retained = read.retainingLastRead(previous)
+        checkEqual(retained.freshness, .stale,
+                   "a transport failure keeps the last good value marked stale")
+        checkEqual(retained.value?.count, 1,
+                   "a transport failure keeps the last good memories")
+        check(retained.error != nil,
+              "a transport failure still exposes the current error")
+    }
+
     StubURLProtocol.respond = nil
 }
