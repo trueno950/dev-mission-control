@@ -60,3 +60,6 @@ Delivery as it stands: the stacked chain is PR #4 (core), PR #5 (panel UI), PR #
 
 
 L4 (merges): the chain was integrated into `main` in order, each child retargeted to `main` immediately before its own merge and re-checked MERGEABLE/CLEAN: PR #4 → `8737d80`, PR #5 → `0e912b3`, PR #6 → `2e5a146`, PR #7 → `1a62262`; local `main` was fast-forwarded to the last merge and all four slice branches were deleted locally and remotely. The merged tree carries the whole feature plus both review corrections and this record.
+
+
+L5 (advisory fixes merged): the four non-blocking advisories from the approved review were closed in their own small change — commit `a8d933c`: a discarded search reply clears the spinner when no newer request took over, a project change during the retake read shows a transient notice instead of a silent no-op, `load()` re-issues an active search after a project change, and the client suite covers the transport error path (7 new checks, 447/447). Native assess over the committed range returned risk medium with `reviewDue: false` (under budget) and no independent verifier. PR #8 merged into `main` as `a2335df`; the branch was deleted locally and remotely.
