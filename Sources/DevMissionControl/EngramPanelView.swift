@@ -269,14 +269,16 @@ final class EngramPanelState: ObservableObject {
         issuedSearchQuery = query
         searchRequestID += 1
         let requestID = searchRequestID
+        let project = resolvedProject
         isSearching = true
-        let read = await client.search(query: query, project: resolvedProject,
+        let read = await client.search(query: query, project: project,
                                        limit: Self.memoriesLimit)
-        // Out-of-order guard: the query changed, was cleared, or a newer
-        // request was issued while this one was in flight, so its reply is
-        // discarded (and its spinner is left to the request that is current).
+        // Out-of-order guard: the query changed, was cleared, a newer request
+        // was issued, or the resolved project changed while this one was in
+        // flight, so its reply is discarded (S4/S5; the spinner is left to the
+        // request that is current).
         guard searchRequestID == requestID, issuedSearchQuery == query,
-              normalizedSearchQuery == query else { return }
+              normalizedSearchQuery == query, project == resolvedProject else { return }
         isSearching = false
         // Only a value read for the same query may be retained; hits from an
         // earlier query are never displayed under this one (S5).
@@ -339,12 +341,17 @@ final class EngramPanelState: ObservableObject {
     /// no information instead of fabricating a memory (S5). Nothing is written
     /// to Engram.
     func copyRetakeContext() async {
-        let newContext = await client.context(project: resolvedProject)
+        // The project is captured with the request and revalidated after the
+        // await: a project change in flight must never compose another
+        // project's context under this repository's name (S4/S5).
+        let project = resolvedProject
+        let newContext = await client.context(project: project)
+        guard project == resolvedProject else { return }
         let applied = newContext.retainingLastRead(contextRead)
         contextRead = applied
         let composed = RetakeContext.compose(
             repoName: repoName, repoPath: repoPath, git: gitStatus,
-            engramProject: resolvedProject, context: applied,
+            engramProject: project, context: applied,
             language: L10n.lang, now: Date())
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(composed, forType: .string)
