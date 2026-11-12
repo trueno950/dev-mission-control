@@ -60,6 +60,7 @@ final class EngramPanelWindowController {
     /// It reuses (or creates) the cached panel state and the panel's own
     /// read/copy path, so the split console never re-implements the composition.
     /// Returns the transient confirmation the panel would show, or nil.
+    @MainActor
     func copyRetakeContext(appState: AppState, repoPath: String) async -> String? {
         let state = panelState(appState: appState, repoPath: repoPath)
         await state.copyRetakeContext()
@@ -378,7 +379,7 @@ final class EngramPanelState: ObservableObject {
         guard project == resolvedProject else {
             // Nothing from the old project is copied, and the discarded action
             // says so instead of failing silently (S2/S5).
-            showCopyNotice(L10n.t("El proyecto cambió; intenta de nuevo",
+            showCopyNotice(L10n.t("El proyecto cambió; volvé a intentar",
                                   "The project changed; try again"))
             return
         }

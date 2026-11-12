@@ -62,6 +62,22 @@ public enum WorktreeCleanup {
         return folder
     }
 
+    /// The common folder of the clean worktrees, offered for ignoring only when
+    /// no worktree with changes or conflicts lives inside it: ignoring silences
+    /// idle notices, so it must never cover active work.
+    public static func ignorableFolder(repoPath: String, cleanPaths: [String],
+                                       activePaths: [String]) -> String? {
+        guard let folder = commonFolder(repoPath: repoPath, worktreePaths: cleanPaths) else {
+            return nil
+        }
+        let root = (repoPath as NSString).standardizingPath
+        let prefix = (root.hasSuffix("/") ? root : root + "/") + folder + "/"
+        let holdsActiveWork = activePaths.contains {
+            ($0 as NSString).standardizingPath.hasPrefix(prefix)
+        }
+        return holdsActiveWork ? nil : folder
+    }
+
     /// Single-quotes one shell argument, escaping embedded single quotes.
     private static func quoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"

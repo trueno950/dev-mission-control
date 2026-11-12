@@ -219,7 +219,10 @@ struct WorktreesSection: View {
                     .controlSize(.small)
                     .help(L10n.t("Vuelve a avisar de estos worktrees inactivos",
                                  "Warn about these idle worktrees again"))
-                } else if let folder = cleanCommonFolder {
+                } else if let folder = WorktreeCleanup.ignorableFolder(
+                    repoPath: snapshot.config.path,
+                    cleanPaths: clean.map { $0.path },
+                    activePaths: active.map { $0.path }) {
                     Button(L10n.t("Ignorar esta carpeta", "Ignore this folder")) {
                         appState.setIgnoredWorktreeFolder(repoPath: snapshot.config.path,
                                                           folder: folder,
@@ -281,7 +284,7 @@ struct WorktreesSection: View {
             }
             .padding(.top, 4)
         } label: {
-            Text(L10n.t("Ver worktrees", "Show worktrees"))
+            Text(L10n.t("Ver worktrees limpios", "Show clean worktrees"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -440,7 +443,7 @@ struct WorktreeActionMenu: View {
 
     private func openEditor() {
         guard let editorApplicationPath else {
-            actionState.actionError = L10n.t("Configura un editor en Ajustes.",
+            actionState.actionError = L10n.t("Configurá un editor en Ajustes.",
                                              "Set up an editor in Settings first.")
             return
         }

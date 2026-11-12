@@ -525,6 +525,7 @@ splitConsoleCoreTests()
 ignoredWorktreeFolderTests()
 splitConsolePanelTests()
 changeBreakdownTests()
+ignorableFolderTests()
 // ghScannerTests()    // T4
 // engramScannerTests() // T5
 

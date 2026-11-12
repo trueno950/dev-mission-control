@@ -62,7 +62,7 @@ struct ConsoleDetailView: View {
     let now: Date
     let onOpenSettings: () -> Void
     let onOpenEngramPanel: (String) -> Void
-    let onCopyRetakeContext: (String) async -> String?
+    let onCopyRetakeContext: @MainActor (String) async -> String?
     @StateObject private var ui = ConsoleDetailUI()
 
     var body: some View {
@@ -447,8 +447,8 @@ struct ConsoleDetailView: View {
                            snapshot.activity.lastReadAt, snapshot.activity.error)
                 Spacer(minLength: 0)
             }
-            // S5: a retained (stale) value never hides the current failure.
-            ForEach(staleErrors, id: \.self) { line in
+            // S5: a retained or missing value never hides the current failure.
+            ForEach(sourceErrors, id: \.self) { line in
                 Text(line)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -458,13 +458,13 @@ struct ConsoleDetailView: View {
         .padding(.top, 4)
     }
 
-    /// Current errors of sources whose last good value is retained as stale.
-    private var staleErrors: [String] {
+    /// Current errors of every source that is not current, stale or unavailable.
+    private var sourceErrors: [String] {
         [("Git", snapshot.git.freshness, snapshot.git.error),
          ("GitHub", snapshot.pr.freshness, snapshot.pr.error),
          ("Engram", snapshot.activity.freshness, snapshot.activity.error)]
             .compactMap { label, freshness, error in
-                guard freshness == .stale, let error else { return nil }
+                guard freshness != .current, let error else { return nil }
                 return "\(label) · \(L10n.t("error actual", "current error")): \(error)"
             }
     }

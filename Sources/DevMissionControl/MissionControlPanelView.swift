@@ -19,10 +19,8 @@ struct MissionControlPanelView: View {
     @ObservedObject var appState: AppState
     let onOpenSettings: () -> Void
     let onOpenEngramPanel: (String) -> Void
-    let onCopyRetakeContext: (String) async -> String?
+    let onCopyRetakeContext: @MainActor (String) async -> String?
     @StateObject private var ui = PanelUIState()
-
-    private var now: Date { Date() }
 
     /// S3: grouped, filtered and ordered rows of the sidebar.
     private var sections: [ConsoleProjectSection] {
@@ -44,15 +42,19 @@ struct MissionControlPanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ConsoleSidebar(appState: appState,
-                               ui: ui,
-                               sections: sections,
-                               selectedPath: selectedPath,
-                               now: now)
-                    .frame(width: 250)
-                Divider().opacity(0.25)
-                detail
+            // Relative ages in the sidebar and detail tick with the clock, not
+            // only when a scan republishes snapshots.
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                HStack(spacing: 0) {
+                    ConsoleSidebar(appState: appState,
+                                   ui: ui,
+                                   sections: sections,
+                                   selectedPath: selectedPath,
+                                   now: context.date)
+                        .frame(width: 250)
+                    Divider().opacity(0.25)
+                    detail(now: context.date)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider().opacity(0.25)
@@ -67,7 +69,7 @@ struct MissionControlPanelView: View {
 
     // MARK: - Detail pane
 
-    @ViewBuilder private var detail: some View {
+    @ViewBuilder private func detail(now: Date) -> some View {
         if appState.config.repos.isEmpty {
             noProjectsState
         } else if let snapshot = selectedSnapshot {
@@ -112,7 +114,9 @@ struct MissionControlPanelView: View {
                 .accessibilityHidden(true)
             Text(L10n.t("No hay proyectos seguidos", "No projects tracked yet"))
                 .font(.headline)
-            Text(L10n.t("Agrega repositorios…", "Add repositories…"))
+            Text(L10n.t("Agregá repositorios para ver PRs, CI, worktrees\ny la última actividad del agente.",
+                        "Add repositories to see PRs, CI, worktrees\nand last agent activity."))
+                .multilineTextAlignment(.center)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button(L10n.t("Abrir ajustes", "Open Settings"), action: onOpenSettings)

@@ -620,3 +620,20 @@ func changeBreakdownTests() {
                "conflicts alone add no breakdown line (the pill already names them)")
     checkEqual(ConsoleWorktreeSummary.breakdown(.none), [], "a clean checkout has no breakdown")
 }
+
+/// Review R3-IGNORE-FOLDER: "Ignore this folder" is offered only when no
+/// worktree with changes or conflicts lives in that folder.
+func ignorableFolderTests() {
+    let repo = "/r/xula"
+    let clean = ["/r/xula/.pi/review-units/a", "/r/xula/.pi/review-units/b"]
+    checkEqual(WorktreeCleanup.ignorableFolder(repoPath: repo, cleanPaths: clean, activePaths: []),
+               ".pi/review-units", "a folder holding only clean worktrees can be ignored")
+    checkEqual(WorktreeCleanup.ignorableFolder(repoPath: repo, cleanPaths: clean,
+                                               activePaths: ["/r/xula/.pi/review-units/c"]),
+               nil, "a folder that also holds an active worktree is never offered")
+    checkEqual(WorktreeCleanup.ignorableFolder(repoPath: repo, cleanPaths: clean,
+                                               activePaths: ["/r/xula/.pi/review-units-other/c"]),
+               ".pi/review-units", "an active worktree in a sibling folder with a shared prefix does not block")
+    checkEqual(WorktreeCleanup.ignorableFolder(repoPath: repo, cleanPaths: ["/r/xula/a"], activePaths: []),
+               nil, "no common folder means nothing to ignore")
+}
