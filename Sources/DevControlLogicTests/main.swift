@@ -521,6 +521,8 @@ engramPanelTests()
 engramPanelClientTests()
 processRunnerTests()
 worktreeActionTests()
+splitConsoleCoreTests()
+ignoredWorktreeFolderTests()
 // ghScannerTests()    // T4
 // engramScannerTests() // T5
 
