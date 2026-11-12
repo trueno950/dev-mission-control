@@ -523,6 +523,7 @@ processRunnerTests()
 worktreeActionTests()
 splitConsoleCoreTests()
 ignoredWorktreeFolderTests()
+splitConsolePanelTests()
 // ghScannerTests()    // T4
 // engramScannerTests() // T5
 
