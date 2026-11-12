@@ -21,10 +21,10 @@ S7: "Pull requests" per the artboard: when GitHub was not read, say so instead o
 
 ## Tasks
 
-T1 [S3,S5,S6] Core: project grouping, primary last commit read, short relative age, shell-safe cleanup command + tests — inline; commit pending.
-T2 [S6] Core + config: per-repository ignored worktree folders (suppress idle notices, backward-compatible config) + tests — inline; commit pending.
-T3 [S2-S7] UI: split console panel, remove the detail window — inline; commit pending.
-T4 [S1,S2] README, design artboards, preview build and acceptance — inline; commit pending.
+T1 [S3,S5,S6] Core: project grouping, primary last commit read, short relative age, shell-safe cleanup command + tests — worker; commit `4f2ec05` (RED compile failures → GREEN 487/487).
+T2 [S6] Core + config: per-repository ignored worktree folders (suppress idle notices, backward-compatible config) + tests — worker; commit `4f2ec05` (RED compile failures → GREEN 508/508). Slice boundary: `4f2ec05` closes the core slice (531 authored lines incl. tests); UI is the next slice.
+T3 [S2-S7] UI: split console panel, remove the detail window — worker; commits `b51e5f1` (pure panel rules + 56 checks, RED compile failures → GREEN 564/564) and `e395709` (SwiftUI split console, detail window deleted; build + launch verified, panel not clicked by automation). Slice note: `e395709` is ~1.6k authored lines because the views only compile together.
+T4 [S1,S2] README, design artboards, preview build and acceptance — inline; commit: the README/design commit that closes this feature; owner visual acceptance pending.
 
 ## Log
 
@@ -43,3 +43,5 @@ L2 (decisions against existing specs, `odd/tasks/dev-mission-control.md`):
 - The primary checkout's last commit is not read today; T1 adds one read-only `git log -1` per repository.
 - GitHub is "unavailable" with no error when a repository has no GitHub remote; the PR section then says no remote was found, and "Copy gh auth login" appears only when the current error is an authentication error.
 - The footer shows each source as an aggregate over projects ("GitHub · 3 of 9 read") so a few local-only repositories do not look like a global outage.
+
+L3 (verification): `swift run DevControlLogicTests` 564/564, `swift build` clean, `scripts/build-app.sh` built and the app launched and stayed up. The panel itself was not opened by automation (the accessibility click does not trigger the status item's mouse-up action), so the visual comparison with the artboard is the owner's acceptance step.

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "03-split-console.html",
+  "handoffs": {
+    "03-split-console.html": {
+      "status": "in_progress",
+      "queued": false,
+      "sentAt": "2026-11-12T00:31:02.257Z",
+      "startedAt": "2026-11-12T00:31:17.928Z",
+      "implementedAt": null,
+      "note": "Reading the SwiftUI panel and detail views to map the split console."
+    }
+  }
+}
