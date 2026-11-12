@@ -1,0 +1,9 @@
+{
+  "title": "Menu bar panel redesign",
+  "brief": "Redesign the Dev Mission Control menu bar panel so it answers 'where was I and what needs attention?' at a glance: honest severity tiers, one global source notice instead of per-card source rows, and a fast path back into work.",
+  "artboards": [
+    { "file": "01-triage-inbox.html", "title": "Triage inbox", "tradeoff": "Fastest to scan for what is blocked; 'where you left off' only appears after expanding a row", "width": 480, "height": 900 },
+    { "file": "02-resume-board.html", "title": "Resume board", "tradeoff": "Best for picking up work (Engram summary + last commit + Resume); severity is secondary and cards take more height", "width": 480, "height": 1000 },
+    { "file": "03-split-console.html", "title": "Split console", "tradeoff": "Everything in one place, no separate detail window; a wide 760 px popover covers more of the screen", "width": 820, "height": 660 }
+  ]
+}

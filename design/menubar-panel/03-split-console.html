@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission Control — Split console</title>
+<style>
+  :root {
+    --desk: #0d0d0f;
+    --panel: #1f1f22;
+    --sidebar: #19191c;
+    --surface: #2a2a2e;
+    --surface-hover: #313136;
+    --line: #3a3a3f;
+    --text: #f2f2f4;
+    --text-2: #b4b4ba;
+    --text-3: #8f8f96;
+    --accent: #5ab0ff;
+    --accent-bg: rgba(90, 176, 255, .16);
+    --red: #ff6b61;
+    --red-bg: rgba(255, 107, 97, .13);
+    --orange: #ffb340;
+    --orange-bg: rgba(255, 179, 64, .13);
+    --gray: #a6a6ad;
+    --green: #3ddc84;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--desk); color: var(--text);
+    font: 13px/1.4 var(--sans); display: flex; justify-content: center; padding: 24px 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+  .panel {
+    width: 760px; height: 600px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.55); overflow: hidden; display: grid;
+    grid-template-columns: 250px 1fr; grid-template-rows: 1fr auto;
+  }
+
+  /* Sidebar */
+  nav { background: var(--sidebar); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .nav-head { padding: 12px 12px 8px 14px; display: flex; align-items: center; gap: 8px; }
+  .nav-head h1 { font-size: 14px; font-weight: 600; margin: 0; flex: 1; }
+  .search {
+    margin: 0 10px 8px; display: flex; align-items: center; gap: 6px; background: var(--surface);
+    border-radius: 7px; padding: 5px 8px; color: var(--text-3);
+  }
+  .search input { background: none; border: 0; color: var(--text); font: inherit; flex: 1; min-width: 0; }
+  .search input::placeholder { color: var(--text-3); }
+  .search input:focus { outline: none; }
+  .search:focus-within { outline: 2px solid var(--accent); }
+  .list { overflow-y: auto; padding: 0 6px 8px; flex: 1; }
+  .group { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; color: var(--text-3); margin: 10px 8px 4px; }
+  .item {
+    display: grid; grid-template-columns: 14px 1fr auto; gap: 0 8px; align-items: center;
+    width: 100%; border: 0; background: transparent; text-align: left; padding: 6px 8px; border-radius: 7px; cursor: pointer;
+  }
+  .item:hover { background: var(--surface); }
+  .item[aria-current="true"] { background: var(--accent-bg); }
+  .item .n { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .w { color: var(--text-3); font-size: 11.5px; }
+  .item .r { grid-column: 2 / span 2; color: var(--text-3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Detail */
+  .detail { overflow-y: auto; padding: 16px 20px 20px; min-height: 0; }
+  .d-head { display: flex; align-items: flex-start; gap: 12px; }
+  .d-head h2 { margin: 0; font-size: 18px; font-weight: 600; }
+  .d-head .branch { font-family: var(--mono); font-size: 12px; color: var(--text-2); margin-top: 2px; }
+  .d-head .acts { margin-left: auto; display: flex; gap: 6px; }
+  .btn {
+    border: 0; border-radius: 7px; padding: 6px 11px; font-size: 12px; cursor: pointer;
+    background: #3a3a40; color: var(--text); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .btn:hover { background: #45454c; }
+  .btn.primary { background: var(--accent); color: #06121f; font-weight: 600; }
+  .btn.primary:hover { background: #7cc1ff; }
+  .btn.small { padding: 3px 9px; font-size: 11.5px; }
+
+  h3 { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; color: var(--text-3); margin: 20px 0 8px; }
+  .resume { background: var(--surface); border-radius: 10px; padding: 12px 14px; }
+  .resume p { margin: 0; }
+  .resume .meta { color: var(--text-3); font-size: 11.5px; margin-top: 6px; }
+  .resume .commit { margin-top: 8px; color: var(--text-2); font-size: 12.5px; }
+  .resume .commit code { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); margin-right: 6px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-weight: 500; color: var(--text-3); font-size: 11.5px; padding: 0 8px 6px 0; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td { padding: 7px 8px 7px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  td .wt { font-weight: 500; }
+  td .sub { color: var(--text-3); font-size: 11.5px; font-family: var(--mono); }
+  td .muted { color: var(--text-3); }
+  .pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #38383e; color: var(--text-2); white-space: nowrap; }
+  .pill.red { background: var(--red-bg); color: var(--red); }
+  .pill.orange { background: var(--orange-bg); color: var(--orange); }
+
+  .grouped {
+    margin-top: 8px; border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .grouped div { flex: 1; }
+  .grouped .sub { color: var(--text-3); font-size: 11.5px; }
+
+  .empty { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; color: var(--text-2); display: flex; gap: 12px; align-items: center; }
+  .empty div { flex: 1; }
+  .empty b { color: var(--text); font-weight: 500; }
+
+  footer {
+    grid-column: 1 / span 2; border-top: 1px solid var(--line); padding: 8px 12px 8px 14px;
+    display: flex; align-items: center; gap: 14px; color: var(--text-3); font-size: 11.5px;
+  }
+  footer .grow { flex: 1; }
+  .src { display: inline-flex; align-items: center; gap: 5px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .dot.ok { background: var(--green); }
+  .dot.off { border: 1.5px solid var(--gray); }
+  .icon-btn {
+    width: 26px; height: 26px; border-radius: 7px; border: 0; background: transparent;
+    color: var(--text-2); display: grid; place-items: center; cursor: pointer;
+  }
+  .icon-btn:hover { background: var(--surface); color: var(--text); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="blocked" viewBox="0 0 14 14"><rect x="2.5" y="2.5" width="9" height="9" rx="1.5" transform="rotate(45 7 7)" fill="#ff6b61"/><rect x="6.25" y="4" width="1.5" height="4" rx=".75" fill="#19191c"/><circle cx="7" cy="9.6" r=".85" fill="#19191c"/></symbol>
+  <symbol id="pending" viewBox="0 0 14 14"><path d="M7 1.8 12.8 12H1.2Z" fill="#ffb340"/><rect x="6.3" y="5.4" width="1.4" height="3.6" rx=".7" fill="#19191c"/><circle cx="7" cy="10.4" r=".8" fill="#19191c"/></symbol>
+  <symbol id="review" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="none" stroke="#a6a6ad" stroke-width="1.6"/></symbol>
+  <symbol id="clean" viewBox="0 0 14 14"><path d="M3 7.2 5.8 10 11 4" fill="none" stroke="#3ddc84" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="paused" viewBox="0 0 14 14"><rect x="4" y="3" width="2" height="8" rx=".8" fill="#8f8f96"/><rect x="8" y="3" width="2" height="8" rx=".8" fill="#8f8f96"/></symbol>
+</svg>
+
+<div class="panel" role="dialog" aria-label="Mission Control">
+  <nav aria-label="Projects">
+    <div class="nav-head">
+      <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="6" fill="none" stroke="#5ab0ff" stroke-width="1.6"/><circle cx="9" cy="9" r="1.6" fill="#5ab0ff"/><path d="M9 1v3M9 14v3M1 9h3M14 9h3" stroke="#5ab0ff" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <h1>Mission Control</h1>
+      <button class="icon-btn" aria-label="Refresh now"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.55M13 2.5V5h-2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+    <label class="search">
+      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <input type="search" placeholder="Filter projects  ⌘F" aria-label="Filter projects">
+    </label>
+    <div class="list" role="list">
+      <div class="group">Needs action</div>
+      <button class="item" role="listitem" data-p="invitame"><svg width="12" height="12" role="img" aria-label="Blocked"><use href="#blocked"/></svg><span class="n">invitame</span><span class="w">40m</span><span class="r">Merge conflict · 2 files</span></button>
+      <button class="item" role="listitem" data-p="pokemon"><svg width="12" height="12" role="img" aria-label="Pending"><use href="#pending"/></svg><span class="n">pokemon-music-widget</span><span class="w">3h</span><span class="r">5 uncommitted</span></button>
+      <button class="item" role="listitem"><svg width="12" height="12" role="img" aria-label="Pending"><use href="#pending"/></svg><span class="n">portafolio-joel-may</span><span class="w">1d</span><span class="r">3 unpushed</span></button>
+      <div class="group">To review</div>
+      <button class="item" role="listitem" aria-current="true" data-p="xula"><svg width="12" height="12" role="img" aria-label="To review"><use href="#review"/></svg><span class="n">xula-sigma</span><span class="w">4d</span><span class="r">4 idle review worktrees</span></button>
+      <button class="item" role="listitem"><svg width="12" height="12" role="img" aria-label="To review"><use href="#review"/></svg><span class="n">car-rental-cancun</span><span class="w">16d</span><span class="r">No agent activity 16 days</span></button>
+      <div class="group">Clean</div>
+      <button class="item" role="listitem"><svg width="12" height="12" role="img" aria-label="Clean"><use href="#clean"/></svg><span class="n">dev-mission-control</span><span class="w">2m</span></button>
+      <button class="item" role="listitem"><svg width="12" height="12" role="img" aria-label="Clean"><use href="#clean"/></svg><span class="n">engram-notes</span><span class="w">5d</span></button>
+      <button class="item" role="listitem"><svg width="12" height="12" role="img" aria-label="Clean"><use href="#clean"/></svg><span class="n">gentle-dots</span><span class="w">9d</span></button>
+      <button class="item" role="listitem"><svg width="12" height="12" role="img" aria-label="Paused"><use href="#paused"/></svg><span class="n">ai-subs-menubar</span><span class="w">Paused</span></button>
+    </div>
+  </nav>
+
+  <main class="detail" aria-labelledby="d-title">
+    <div class="d-head">
+      <div>
+        <h2 id="d-title">xula-sigma</h2>
+        <div class="branch">main · ~/Documents/Projects/xula-sigma</div>
+      </div>
+      <div class="acts">
+        <button class="btn primary">Open in VS Code</button>
+        <button class="btn">Terminal</button>
+        <button class="btn" aria-label="More actions">•••</button>
+      </div>
+    </div>
+
+    <h3>Where you left off</h3>
+    <div class="resume">
+      <p>Territory flow audit closed (PR 126–132). Remaining: decide whether the selector refactor ships before the search work.</p>
+      <div class="meta">Engram summary · 7 Nov 2:35 p.m. · 38 memories · <a href="#" style="color:var(--accent)">Open memories</a></div>
+      <div class="commit"><code>d34bec1</code>fix(territory): close the audit for assigned zones · 4 days ago</div>
+      <div style="margin-top:10px; display:flex; gap:6px">
+        <button class="btn small">Copy context to resume</button>
+      </div>
+    </div>
+
+    <h3>Worktrees</h3>
+    <table>
+      <thead><tr><th>Worktree</th><th>State</th><th class="num">Last commit</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><div class="wt">main</div><div class="sub">primary checkout</div></td>
+          <td><span class="pill">Clean</span></td>
+          <td class="num muted">4 d</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="grouped">
+      <svg width="16" height="16" aria-hidden="true"><use href="#review"/></svg>
+      <div>
+        <div>4 review worktrees, clean, idle 15–17 days</div>
+        <div class="sub">.pi/review-units/ · busqueda-12d6377, integracion-2db9ef0, selector-d32456a, t6a-0d34bec</div>
+      </div>
+      <button class="btn small">Copy cleanup command</button>
+      <button class="btn small">Ignore this folder</button>
+    </div>
+
+    <h3>Pull requests</h3>
+    <div class="empty" role="status">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="#a6a6ad" stroke-width="1.4"/><path d="M8 4.5v4.2" stroke="#a6a6ad" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.2" r=".9" fill="#a6a6ad"/></svg>
+      <div><b>Not read.</b> GitHub CLI is not signed in, so open PRs and CI are unknown — not zero.</div>
+      <button class="btn small">Copy <code style="font-family:var(--mono)">gh auth login</code></button>
+    </div>
+  </main>
+
+  <footer>
+    <span class="src"><i class="dot ok"></i>Git · 2 min ago</span>
+    <span class="src"><i class="dot off"></i>GitHub · unavailable</span>
+    <span class="src"><i class="dot ok"></i>Engram · 2 min ago</span>
+    <span class="grow"></span>
+    <span>Next scan in 3 min</span>
+    <button class="icon-btn" aria-label="Settings">
+      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </button>
+  </footer>
+</div>
+<script>
+  document.querySelectorAll('.item').forEach(function (it) {
+    it.addEventListener('click', function () {
+      document.querySelectorAll('.item').forEach(function (o) { o.removeAttribute('aria-current'); });
+      it.setAttribute('aria-current', 'true');
+    });
+  });
+</script>
+</body>
+</html>

@@ -103,6 +103,7 @@ public enum AttentionMath {
                                                message: "Worktree \(worktree.name) \(verb) \(count) \(label)",
                                                worktreePath: worktree.path))
                 } else if !snapshot.config.isPaused, !worktree.isDirty,
+                          !snapshot.config.ignoresWorktree(at: worktree.path),
                           worktree.ageDays > thresholds.staleWorktreeDays {
                     let age = language.pick(
                         es: AppLanguage.plural(worktree.ageDays, "1 día", "\(worktree.ageDays) días"),

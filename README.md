@@ -1,6 +1,6 @@
 # Dev Mission Control
 
-A native macOS menu bar app that answers **"where was I and what needs attention?"** across all your local projects in one click. Click the scope icon in the menu bar to open a borderless panel with compact project cards, a visible Atención/Todos selector, per-source freshness, and per-project detail windows. The interface language follows the system automatically (Spanish for `es*` systems, English otherwise); worktree, staged, unstaged, untracked, diff, and PR stay as technical terms.
+A native macOS menu bar app that answers **"where was I and what needs attention?"** across all your local projects in one click. Click the scope icon in the menu bar to open a borderless split console: a grouped, filterable project list on the left and the selected project's detail on the right, with per-source freshness in one panel and no separate detail window. The interface language follows the system automatically (Spanish for `es*` systems, English otherwise); worktree, staged, unstaged, untracked, diff, and PR stay as technical terms.
 
 ## What it flags
 
@@ -17,7 +17,7 @@ For each tracked project, Dev Mission Control separates pending local work from 
 | Worktree `X` idle too long | A clean linked worktree's last commit is older than the worktree threshold and its project is not paused | info |
 | Engram inactivity | Engram is available and its latest observation is older than the inactivity threshold; project is not paused | info |
 
-A project is paused only when explicitly configured as paused. Pausing suppresses Engram inactivity and idle-clean-worktree notices; it does not hide conflicts, failing checks, or unpushed commits. File modification dates are not used to infer agent activity, and a worktree's last-commit age stays informational: it is neither the local modification time nor agent activity. Informational findings are not urgent, but remain visible notices. The panel header distinguishes projects with current findings from the total visible findings (for example, **"2 proyectos · 5 avisos"** / "2 projects · 5 notices"). Source states are reported separately and do not inflate those counts. Findings follow the system language (for example, "Worktree prop-139 tiene 2 conflictos de merge" / "Worktree prop-139 has 2 merge conflicts", "PR #14 con checks fallidos" / "PR #14 failing CI").
+A project is paused only when explicitly configured as paused. Pausing suppresses Engram inactivity and idle-clean-worktree notices; it does not hide conflicts, failing checks, or unpushed commits. File modification dates are not used to infer agent activity, and a worktree's last-commit age stays informational: it is neither the local modification time nor agent activity. Informational findings are not urgent, but remain visible notices: the panel sorts them into **Para revisar**, apart from **Necesitan acción**, which only holds warnings and critical findings. Source states are reported separately and never create a finding. Findings follow the system language (for example, "Worktree prop-139 tiene 2 conflictos de merge" / "Worktree prop-139 has 2 merge conflicts", "PR #14 con checks fallidos" / "PR #14 failing CI").
 
 ## Data sources
 
@@ -39,19 +39,35 @@ Each source — local Git, the `gh` CLI, and the Engram HTTP API — is read ind
 | Stale | The latest read failed after an earlier success; the last valid value is retained in memory and the current failure is shown separately as unavailable |
 | Unavailable | The latest read failed and no earlier value exists |
 
-A failed refresh never erases the last good value: the retained value is marked stale and the current error is reported alongside it, so a `gh` failure is never an empty PR list and an Engram outage is never "no activity". Only current reads create findings; an unavailable or stale source is "no information", not an attention alert. Source freshness renders as one airy row per source (Git, GitHub, Engram) with the read time inline (UI wording: `actual` / `antiguo` / `no disponible`; Engram shows `Conectado` / `Sin conexión`). GitHub rows show the open-PR count; Engram rows show the latest activity date and title plus the saved summary, and an **Abrir panel** action opens the in-app memories window described below; a secondary **TUI global** action still opens `engram tui` in Terminal (the local Engram server has no web dashboard), labelled honestly because it is global and takes a few seconds to leave its loading box. Details and tooltips include the full data plus current source errors. Each source degrades independently, so local Git stays queryable when `gh` or Engram is down.
+A failed refresh never erases the last good value: the retained value is marked stale and the current error is reported alongside it, so a `gh` failure is never an empty PR list and an Engram outage is never "no activity". Only current reads create findings; an unavailable or stale source is "no information", not an attention alert. Each project's detail ends with one source line (Git, GitHub, Engram) using the wording `actual` / `antiguo` / `no disponible`, with the read time and any current error in its tooltip. The panel footer rolls the three sources up across projects: "Git · hace 2 min" when every read is current, otherwise a count such as "GitHub · 3 de 9 leídos", so a few local-only repositories never look like a global outage. The detail's **•••** menu opens the in-app memories window described below and, as a secondary action, `engram tui` in Terminal (the local Engram server has no web dashboard), labelled **TUI global de Engram** because it is global and takes a few seconds to leave its loading box. Each source degrades independently, so local Git stays queryable when `gh` or Engram is down.
 
-Engram's connection state is shown separately from its saved memory. `Conectado · consultado…` means the recent HTTP read succeeded; it does **not** claim the memory reflects the current code. When the bounded observations page contains a saved session summary (an observation of type `session_summary`), the card also shows `Resumen guardado · <date>`; when none is present in the page, the badge says `Sin resumen guardado` instead of inventing one.
+Engram's connection state is shown separately from its saved memory: a current read does **not** claim the memory reflects the current code. Engram stores session summaries as a title and date only, so **Dónde te quedaste** shows the latest memory's title and date (marked `antiguo` when the read is stale), says `Sin memorias de Engram` or `Engram sin conexión` instead of inventing one, and adds the primary checkout's last commit (short hash, subject, age) read with `git log -1`.
 
-## Panel and detail windows
+## Split console panel
 
-The panel keeps compact summary cards: repository name, primary checkout branch, worktree count, primary notice, and per-source freshness. A segmented Atención/Todos selector gives visible access to every tracked project, including clean or paused ones. Clicking a card opens a per-project detail window; clicking a notice opens the detail window focused (highlighted and scrolled) on that notice's worktree. Inside the detail window, worktrees are ordered conflicts first, then worktrees with pending changes; clean worktrees stay collapsed under "Ver los N worktrees limpios". Git-unavailable worktrees are not presented as an empty list. Pause or resume a project from its **Settings → Repositorios** row.
+The panel is a 760 × 600 split console that stays on the status item's screen.
 
-Scans are non-overlapping: a manual or scheduled refresh is skipped while one is already running, so the panel never blocks. Every external operation is bounded — `git` and `gh` subprocesses time out after 30 s by default, and Engram requests use a 3 s request / 5 s resource timeout. Periodic scanning never calls a model. Subprocesses are launched by executable path with a separate argument vector; repository paths are passed as discrete `-C` arguments and are never concatenated into a shell command string.
+**Sidebar.** A **Filtrar proyectos** field and the tracked projects grouped in triage order. Each row shows a severity shape (not color alone), the project name, a short age since the last commit or memory ("40m", "3h", "4d", "3w"), and a one-line reason.
+
+| Group | Contents |
+| --- | --- |
+| Necesitan acción | Any warning or critical finding: merge conflicts, failing CI, unpushed commits |
+| En curso | Pending local changes only; informational, never an alert |
+| Para revisar | Informational findings only (idle clean worktrees, old PRs, Engram inactivity) |
+| Sin datos | No findings and a Git read that is unavailable or stale; never presented as clean |
+| Limpios | Nothing to report; paused projects show **Pausado** here unless a warning applies |
+
+**Detail.** The selected project's header shows its primary branch and home-abbreviated path, with **Abrir en <Editor>** (or **Configurar editor…**), **Terminal**, and a **•••** menu (Engram memories, Engram TUI, Finder, copy path). Below it:
+
+- **Dónde te quedaste**: the latest Engram memory, an **Abrir memorias** link, the last commit, and **Copiar contexto para retomar**, which composes the same retake context as the memories window without opening it.
+- **Worktrees**: a table with the primary checkout first, then worktrees with conflicts or pending changes, each with a state pill ("2 conflictos", "3 cambios", "Limpio") and its last-commit age; zero counters are not shown. Clean linked worktrees collapse into one block ("4 worktrees limpios, inactivos 15–17 días") with **Copiar comando de limpieza** and, when they share one repository folder, **Ignorar esta carpeta** / **Dejar de ignorar**. A Git-unavailable read is never shown as an empty table.
+- **Pull requests**: open PRs with age and CI state. When GitHub was not read, the section says **No leído.** and explains why: no GitHub remote, or the current `gh` error, with **Copiar gh auth login** only for authentication errors.
+
+Pause or resume a project from its **Ajustes → Repositorios** row.
 
 ## Engram memories panel
 
-Every repository has a read-only **Memorias de Engram** window — opened from the detail window's **Memorias de Engram** row or from the Engram source badge's **Abrir panel** action — that reads the local Engram HTTP API directly instead of opening a terminal:
+Every repository has a read-only **Memorias de Engram** window — opened from the detail's **Abrir memorias** link or its **•••** menu — that reads the local Engram HTTP API directly instead of opening a terminal:
 
 | Section | Read | What it shows |
 | --- | --- | --- |
@@ -65,9 +81,9 @@ Every section is its own source with its own freshness line and read time, so an
 
 ## Worktree actions
 
-Each linked worktree has an Actions menu to open its folder in the Editor selected in Settings (or "Configurar editor…" when none is configured, which opens Settings), open it in macOS Terminal or Finder, copy its path, or display `git diff HEAD`. The diff sheet colorizes lines: additions green, removals red, hunk headers in the accent color, and file metadata dimmed. The diff includes staged and unstaged tracked changes; untracked files are not included.
+Each worktree row in the detail has an Actions menu to open its folder in the Editor selected in Settings (or "Configurar editor…" when none is configured, which opens Settings), open it in macOS Terminal or Finder, copy its path, or display `git diff HEAD`. The diff sheet colorizes lines: additions green, removals red, hunk headers in the accent color, and file metadata dimmed. The diff includes staged and unstaged tracked changes; untracked files are not included.
 
-The repository detail window also lists the project's open pull requests with their title, age, and CI state, plus an **Abrir** button that opens the PR in the browser using only the HTTPS URL returned by `gh`. A pull-request action appears only when exactly one current PR has both the same branch name and HEAD object ID as the worktree and `gh` returned an HTTPS URL. Branch-only or stale-data matches are not opened. These actions do not commit, push, merge, or remove worktrees.
+The detail's pull-request section lists the project's open pull requests with their title, age, and CI state, plus an **Abrir** button that opens the PR in the browser using only the HTTPS URL returned by `gh`. A pull-request action appears only when exactly one current PR has both the same branch name and HEAD object ID as the worktree and `gh` returned an HTTPS URL. Branch-only or stale-data matches are not opened. These actions do not commit, push, merge, or remove worktrees.
 
 ## Requirements
 
@@ -132,7 +148,8 @@ The file is created on first save (from the Settings window). Set the `DMC_CONFI
       "githubSlug": "owner/my-project",
       "engramProject": "my-project",
       "enabled": true,
-      "isPaused": false
+      "isPaused": false,
+      "ignoredWorktreeFolders": [".pi/review-units"]
     }
   ],
   "refreshIntervalMinutes": 5,
@@ -151,6 +168,7 @@ The file is created on first save (from the Settings window). Set the `DMC_CONFI
 | `repos[].engramProject` | Optional Engram project name; defaults to the folder name |
 | `repos[].enabled` | Optional; defaults to `true` when omitted |
 | `repos[].isPaused` | Optional; defaults to `false`; suppresses inactivity and idle-worktree notices |
+| `repos[].ignoredWorktreeFolders` | Optional; defaults to `[]`; repository-relative folders whose clean idle worktrees produce no notice (conflicts still do). Set from the panel's **Ignorar esta carpeta** |
 | `refreshIntervalMinutes` | Auto-refresh interval (default 5) |
 | `staleWorktreeDays` | Informational threshold for clean idle worktrees (default 7) |
 | `stalePRDays` | Informational open-PR age threshold; age alone is not urgent (default 7) |
@@ -164,7 +182,7 @@ Decoding is tolerant: omitted keys fall back to defaults, so configs written by 
 - **No stale local-branch detection.** Squash merges make `git branch --no-merged` unreliable, so branches that look unmerged may already be merged upstream. This was deliberately left out of v1.
 - **Worktree age is derived from its last commit date**, not from when the worktree was created or linked.
 - **Unavailable sources never fabricate findings, and stale data is identified.** If `gh` is missing or unauthenticated, PR/CI findings are skipped for that repo and the source is unavailable; when a previous successful read exists, its PR list is retained and marked stale rather than emptied. If Engram is unreachable, activity findings are skipped and the source is unavailable; the last known activity is retained as stale. A missing or invalid repo path is an unavailable Git source, not a clean result or an attention alert; independent current sources remain classifiable.
-- **Read-only by contract.** The app runs `git` queries, `gh pr list`, and Engram `GET` reads only; it stores no credentials (git and the `gh` keyring stay external).
+- **Read-only by contract.** The app runs `git` queries, `gh pr list`, and Engram `GET` reads only; it stores no credentials (git and the `gh` keyring stay external). **Copiar comando de limpieza** only copies shell-quoted `git worktree remove` lines to the clipboard; the app never runs them.
 - **The Engram panel matches by registered directory, and an ancestor registration can win.** The panel picks the most specific registered directory prefix, so a repository whose parent directory is registered to another project inherits that project when it has no registration of its own (Engram registers `~/Documents/Projects` for `dev-mission-control`). The configured `engramProject` always wins, and the panel states which origin it used.
 - **The Engram TUI stays available but is global and slow.** `engram tui` needs about five seconds to leave its "Loading stats..." box and always shows global numbers, so it is a secondary action for administration rather than the per-project answer the panel gives.
 
@@ -174,11 +192,16 @@ Decoding is tolerant: omitted keys fall back to defaults, so configs written by 
 Sources/DevControlCore/        Models, config store, attention math, scanners (git, gh, Engram)
   EngramPanel.swift            Panel models, response parsers, project resolver, request builder
   EngramPanelClient.swift      Read-only Engram HTTP reads and the retake-context composer
-Sources/DevMissionControl/     Menu bar app: AppState, panel, settings window, --scan-once
+Sources/DevMissionControl/     Menu bar app: AppState, split console panel, settings window, --scan-once
+  ConsoleSidebar.swift         Grouped, filterable project list
+  ConsoleDetailView.swift      Selected project's header, where you left off, pull requests, sources
+  WorktreesSection.swift       Worktree table, clean-worktree block, per-worktree actions and diff
   EngramPanelView.swift        Per-project Engram memories window (counters, memories, search, sessions, copy)
 Sources/DevControlLogicTests/  Executable logic tests (custom check harness)
 scripts/build-app.sh           CLT-only build + .app bundle assembly
 Packaging/Info.plist           Bundle metadata
 odd/tasks/dev-mission-control.md   ODD feature spec and log (attention delivery)
 odd/tasks/engram-direct-panel.md   ODD feature spec and log (Engram direct panel)
+odd/tasks/split-console-panel.md   ODD feature spec and log (split console panel)
+design/menubar-panel/          Panel design directions (03-split-console is the implemented one)
 ```

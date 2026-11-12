@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "03-split-console.html",
+  "handoffs": {
+    "03-split-console.html": {
+      "status": "implemented",
+      "queued": false,
+      "sentAt": "2026-11-12T00:31:02.257Z",
+      "startedAt": "2026-11-12T00:31:17.928Z",
+      "implementedAt": "2026-11-12T01:06:54.168Z",
+      "note": "Native SwiftUI split console (760x600) on feat/split-console-panel, commits 4f2ec05..2ab7a02. Menu bar app, no loopback URL; open it from the scope icon."
+    }
+  }
+}

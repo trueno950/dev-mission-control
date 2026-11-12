@@ -14,19 +14,25 @@ public struct RepoConfig: Codable, Hashable, Sendable, Identifiable {
     /// Explicit user-declared pause; suppresses inactivity notices without
     /// inferring anything about agent activity from repository files.
     public var isPaused: Bool
+    /// Repository-relative folders whose worktrees are ignored (S6). An idle
+    /// clean worktree inside one of these folders produces no notice, so
+    /// harness-created folders such as `.pi/review-units` can stay silent.
+    public var ignoredWorktreeFolders: [String]
 
     public init(id: String, path: String, githubSlug: String? = nil,
-                engramProject: String? = nil, enabled: Bool = true, isPaused: Bool = false) {
+                engramProject: String? = nil, enabled: Bool = true, isPaused: Bool = false,
+                ignoredWorktreeFolders: [String] = []) {
         self.id = id
         self.path = path
         self.githubSlug = githubSlug
         self.engramProject = engramProject
         self.enabled = enabled
         self.isPaused = isPaused
+        self.ignoredWorktreeFolders = ignoredWorktreeFolders
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, path, githubSlug, engramProject, enabled, isPaused
+        case id, path, githubSlug, engramProject, enabled, isPaused, ignoredWorktreeFolders
     }
 
     /// Tolerant decoding: new optional keys and omitted booleans fall back to
@@ -39,6 +45,25 @@ public struct RepoConfig: Codable, Hashable, Sendable, Identifiable {
         engramProject = try container.decodeIfPresent(String.self, forKey: .engramProject)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         isPaused = try container.decodeIfPresent(Bool.self, forKey: .isPaused) ?? false
+        ignoredWorktreeFolders = try container.decodeIfPresent(
+            [String].self, forKey: .ignoredWorktreeFolders) ?? []
+    }
+
+    /// S6: whether a worktree path sits strictly inside one of the ignored
+    /// folders, resolved against this repository. The comparison is made on a
+    /// folder boundary, so ignoring `.pi/review` never matches
+    /// `.pi/review-units/a`.
+    public func ignoresWorktree(at path: String) -> Bool {
+        guard !ignoredWorktreeFolders.isEmpty else { return false }
+        let repoRoot = (self.path as NSString).standardizingPath
+        let worktree = (path as NSString).standardizingPath
+        for folder in ignoredWorktreeFolders {
+            let relative = folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard !relative.isEmpty else { continue }
+            let prefix = repoRoot + "/" + relative + "/"
+            if worktree.hasPrefix(prefix) { return true }
+        }
+        return false
     }
 
     /// Folder name of the repository path.
@@ -255,6 +280,20 @@ public struct SessionSummaryInfo: Hashable, Sendable {
     }
 }
 
+/// HEAD commit of the primary checkout (S5): short hash, subject and author
+/// date from a single read-only `git log -1`.
+public struct LastCommitInfo: Hashable, Sendable {
+    public var shortHash: String
+    public var subject: String
+    public var date: Date
+
+    public init(shortHash: String, subject: String, date: Date) {
+        self.shortHash = shortHash
+        self.subject = subject
+        self.date = date
+    }
+}
+
 /// Result of scanning one repository with local git.
 public struct GitStatus: Hashable, Sendable {
     public var branch: String?
@@ -269,6 +308,9 @@ public struct GitStatus: Hashable, Sendable {
     /// True when `lastReadAt` is from an earlier successful read and the latest
     /// attempt failed, so the held value is retained rather than current.
     public var isStale: Bool
+    /// HEAD commit of the primary checkout (S5); nil when the repository has no
+    /// commits yet or the read failed.
+    public var lastCommit: LastCommitInfo?
 
     /// Identity, read time, availability, and freshness of this Git read (S5).
     public var freshness: SourceFreshness {
@@ -282,7 +324,7 @@ public struct GitStatus: Hashable, Sendable {
     public init(branch: String? = nil, dirtyCount: Int = 0, unpushedCount: Int = 0,
                 worktrees: [WorktreeInfo] = [], error: String? = nil,
                 changes: ChangeCounts? = nil, lastReadAt: Date? = nil,
-                isStale: Bool = false) {
+                isStale: Bool = false, lastCommit: LastCommitInfo? = nil) {
         self.branch = branch
         // Legacy callers supply only `dirtyCount`; without a category
         // breakdown the total is attributed to unstaged changes.
@@ -292,6 +334,7 @@ public struct GitStatus: Hashable, Sendable {
         self.error = error
         self.lastReadAt = lastReadAt
         self.isStale = isStale
+        self.lastCommit = lastCommit
     }
 
     /// S5/S12: when the latest read failed after a successful one, keep the
@@ -303,6 +346,7 @@ public struct GitStatus: Hashable, Sendable {
         retained.changes = previous.changes
         retained.unpushedCount = previous.unpushedCount
         retained.worktrees = previous.worktrees
+        retained.lastCommit = previous.lastCommit
         retained.lastReadAt = previous.lastReadAt
         retained.isStale = true
         return retained

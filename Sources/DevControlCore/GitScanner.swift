@@ -146,8 +146,10 @@ public struct GitScanner {
             let changes = try statusChanges(repoPath)
             let unpushedCount = unpushedCommitCount(repoPath)
             let worktrees = try scanWorktrees(repoPath, now: now, calendar: calendar)
+            let lastCommit = lastCommitInfo(repoPath)
             return GitStatus(branch: branch, unpushedCount: unpushedCount,
-                             worktrees: worktrees, changes: changes, lastReadAt: now)
+                             worktrees: worktrees, changes: changes, lastReadAt: now,
+                             lastCommit: lastCommit)
         } catch {
             return GitStatus(error: describe(error, for: repoPath))
         }
@@ -206,6 +208,17 @@ public struct GitScanner {
                                        lastCommitAt: lastCommitAt, changes: changes))
         }
         return result
+    }
+
+    /// S5: last commit of the primary checkout. A read failure (for example an
+    /// empty repository) yields no commit instead of failing the whole scan.
+    private func lastCommitInfo(_ repoPath: String) -> LastCommitInfo? {
+        let output = try? runner.run(
+            git,
+            ["-C", repoPath, "log", "-1", "--format=%h%x09%ct%x09%s"],
+            in: nil
+        )
+        return output.flatMap(GitParser.parseLastCommit)
     }
 
     private func lastCommitTimestamps(_ repoPath: String, commits: [String]) -> [String: Date] {
@@ -307,6 +320,18 @@ public enum GitParser {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let epoch = TimeInterval(trimmed) else { return nil }
         return Date(timeIntervalSince1970: epoch)
+    }
+
+    /// Parses `git log -1 --format=%h%x09%ct%x09%s` into the primary checkout's
+    /// last commit (S5). Only the first two tabs separate fields, so a subject
+    /// may itself contain tabs; anything else is not a last-commit line.
+    public static func parseLastCommit(_ output: String) -> LastCommitInfo? {
+        let line = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fields = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+        guard fields.count == 3, !fields[0].isEmpty,
+              let epoch = TimeInterval(fields[1]) else { return nil }
+        return LastCommitInfo(shortHash: String(fields[0]), subject: String(fields[2]),
+                              date: Date(timeIntervalSince1970: epoch))
     }
 
     /// Parses `git log --no-walk --format=%H%x09%ct` rows into commit dates.

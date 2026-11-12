@@ -7,32 +7,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var panel: StatusPanel?
     private let settingsController = SettingsWindowController()
-    private lazy var detailController = RepositoryDetailWindowController()
     private lazy var engramPanelController = EngramPanelWindowController()
     private lazy var appState = AppState()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // One panel, no separate detail window (S2): the split console owns the
+        // project list and the selected project's detail. Settings and the
+        // per-project Engram panel stay separate windows.
         let panel = StatusPanel(content: MissionControlPanelView(
             appState: appState,
             onOpenSettings: { [weak self] in self?.openSettings() },
-            onOpenDetail: { [weak self] repoPath, focusWorktreePath in
-                guard let self else { return }
-                self.detailController.show(
-                    appState: self.appState,
-                    repoPath: repoPath,
-                    focusWorktreePath: focusWorktreePath,
-                    onOpenSettings: { [weak self] in self?.openSettings() },
-                    onOpenEngramPanel: { [weak self] in
-                        guard let self else { return }
-                        self.engramPanelController.show(appState: self.appState,
-                                                        repoPath: repoPath)
-                    })
-            },
             onOpenEngramPanel: { [weak self] repoPath in
                 guard let self else { return }
                 self.engramPanelController.show(appState: self.appState, repoPath: repoPath)
             },
-            onQuit: { NSApp.terminate(nil) }
+            onCopyRetakeContext: { [weak self] repoPath in
+                guard let self else { return nil }
+                return await self.engramPanelController.copyRetakeContext(
+                    appState: self.appState, repoPath: repoPath)
+            }
         ))
         self.panel = panel
 
