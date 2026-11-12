@@ -35,23 +35,7 @@ final class EngramPanelWindowController {
     private var states: [String: EngramPanelState] = [:]
 
     func show(appState: AppState, repoPath: String) {
-        let snapshot = appState.snapshots.first { $0.config.path == repoPath }
-        let state: EngramPanelState
-        if let existing = states[repoPath] {
-            state = existing
-        } else {
-            let name = snapshot?.config.id ?? (repoPath as NSString).lastPathComponent
-            state = EngramPanelState(repoPath: repoPath,
-                                     repoName: name,
-                                     configuredEngramProject: snapshot?.config.engramProject)
-            states[repoPath] = state
-        }
-        // Set on every presentation: a reused window must compose its retake
-        // context from the app's current Git read, and a repository with no
-        // snapshot is presented as an unread Git source, never as zeros (S5).
-        state.gitStatus = snapshot?.git ?? GitStatus(
-            error: L10n.t("No hay estado de Git para este repositorio.",
-                          "No Git status for this repository."))
+        let state = panelState(appState: appState, repoPath: repoPath)
 
         let window: NSWindow
         if let existing = windows[repoPath] {
@@ -70,6 +54,38 @@ final class EngramPanelWindowController {
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// S5: copies this repository's retake context without presenting a window.
+    /// It reuses (or creates) the cached panel state and the panel's own
+    /// read/copy path, so the split console never re-implements the composition.
+    /// Returns the transient confirmation the panel would show, or nil.
+    func copyRetakeContext(appState: AppState, repoPath: String) async -> String? {
+        let state = panelState(appState: appState, repoPath: repoPath)
+        await state.copyRetakeContext()
+        return state.copyConfirmation
+    }
+
+    /// Per-repository panel state shared by the window and the copy action. The
+    /// current Git read is set on every use: a reused state must compose its
+    /// retake context from the app's latest read, and a repository without a
+    /// snapshot is treated as an unread Git source, never as zeros (S5).
+    private func panelState(appState: AppState, repoPath: String) -> EngramPanelState {
+        let snapshot = appState.snapshots.first { $0.config.path == repoPath }
+        let state: EngramPanelState
+        if let existing = states[repoPath] {
+            state = existing
+        } else {
+            let name = snapshot?.config.id ?? (repoPath as NSString).lastPathComponent
+            state = EngramPanelState(repoPath: repoPath,
+                                     repoName: name,
+                                     configuredEngramProject: snapshot?.config.engramProject)
+            states[repoPath] = state
+        }
+        state.gitStatus = snapshot?.git ?? GitStatus(
+            error: L10n.t("No hay estado de Git para este repositorio.",
+                          "No Git status for this repository."))
+        return state
     }
 }
 
@@ -362,7 +378,7 @@ final class EngramPanelState: ObservableObject {
         guard project == resolvedProject else {
             // Nothing from the old project is copied, and the discarded action
             // says so instead of failing silently (S2/S5).
-            showCopyNotice(L10n.t("El proyecto cambió; volvé a intentar",
+            showCopyNotice(L10n.t("El proyecto cambió; intenta de nuevo",
                                   "The project changed; try again"))
             return
         }

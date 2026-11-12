@@ -7,7 +7,7 @@ final class StatusPanel: NSPanel {
     private var monitor: Any?
 
     init(content: some View) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 520),
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 760, height: 600),
                    styleMask: [.borderless, .nonactivatingPanel, .utilityWindow],
                    backing: .buffered, defer: false)
 
@@ -24,11 +24,19 @@ final class StatusPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
 
+    /// S2: the panel is centered under the status item and clamped to that
+    /// screen, so the wide 760-pt popover never hangs off the display edge.
     func placeBelowStatusBarItem(_ item: NSStatusItem) {
         guard let button = item.button, let buttonWindow = button.window else { return }
         let frame = buttonWindow.frame
         let width = self.frame.width
-        let x = max(8, frame.midX - width / 2)
+        var x = frame.midX - width / 2
+        if let visible = buttonWindow.screen?.visibleFrame {
+            x = min(x, visible.maxX - width - 8)
+            x = max(visible.minX + 8, x)
+        } else {
+            x = max(8, x)
+        }
         let y = frame.minY - 8
         setFrameTopLeftPoint(NSPoint(x: x, y: y))
     }

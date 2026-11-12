@@ -56,34 +56,28 @@ final class AppState: ObservableObject {
 
     // MARK: - Derived values
 
+    /// The snapshot with the live configuration applied. A config mutation (a
+    /// pause or an ignored worktree folder) is reflected immediately instead of
+    /// after the next scan, because findings and grouping read `config` (S6).
+    func liveSnapshot(for snapshot: RepoSnapshot) -> RepoSnapshot {
+        guard let live = config.repos.first(where: { $0.path == snapshot.config.path }),
+              live != snapshot.config else { return snapshot }
+        var updated = snapshot
+        updated.config = live
+        return updated
+    }
+
     func items(for snapshot: RepoSnapshot) -> [AttentionItem] {
-        AttentionMath.classify(snapshot, now: evaluationDate, calendar: .current,
-                               thresholds: config)
+        AttentionMath.classify(liveSnapshot(for: snapshot), now: evaluationDate,
+                               calendar: .current, thresholds: config)
     }
 
-    var attentionSummary: AttentionSummary {
-        AttentionMath.summaryCounts(snapshots, now: evaluationDate,
-                                    calendar: .current, thresholds: config)
+    /// S3: the sidebar rows of the split console, already grouped and aged from
+    /// the same evaluation date as the findings.
+    var consoleRows: [ConsoleProjectRow] {
+        snapshots.map { ConsoleProjectRow(snapshot: liveSnapshot(for: $0),
+                                          items: items(for: $0)) }
     }
-
-    /// Repositories currently needing attention, ordered by severity of their
-    /// worst item (critical first), then by name.
-    var attentionOrder: [RepoSnapshot] {
-        snapshots.filter { !items(for: $0).isEmpty }
-            .sorted { lhs, rhs in
-                let lhsWorst = items(for: lhs).first?.severity ?? .info
-                let rhsWorst = items(for: rhs).first?.severity ?? .info
-                if lhsWorst != rhsWorst { return lhsWorst > rhsWorst }
-                return lhs.config.id < rhs.config.id
-            }
-    }
-
-    var cleanOrder: [RepoSnapshot] {
-        snapshots.filter { items(for: $0).isEmpty }
-            .sorted { $0.config.id < $1.config.id }
-    }
-
-    var attentionCount: Int { attentionOrder.count }
 
     // MARK: - Refresh pipeline
 
@@ -163,5 +157,23 @@ final class AppState: ObservableObject {
     func setPaused(path: String, isPaused: Bool) {
         guard let index = config.repos.firstIndex(where: { $0.path == path }) else { return }
         config.repos[index].isPaused = isPaused
+    }
+
+    /// S6: ignore or stop ignoring one repository-relative worktree folder. The
+    /// change persists through `config` and findings re-derive from it, so no
+    /// rescan is needed.
+    func setIgnoredWorktreeFolder(repoPath: String, folder: String, ignored: Bool) {
+        guard let index = config.repos.firstIndex(where: { $0.path == repoPath }) else { return }
+        let normalized = folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !normalized.isEmpty else { return }
+        var folders = config.repos[index].ignoredWorktreeFolders
+        if ignored {
+            guard !folders.contains(normalized) else { return }
+            folders.append(normalized)
+        } else {
+            guard folders.contains(normalized) else { return }
+            folders.removeAll { $0 == normalized }
+        }
+        config.repos[index].ignoredWorktreeFolders = folders
     }
 }

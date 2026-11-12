@@ -2,812 +2,192 @@ import AppKit
 import SwiftUI
 import DevControlCore
 
-/// Visible panel filter: attention first, or every tracked project (S17).
-enum PanelProjectFilter: Hashable {
-    case attention
-    case all
-}
-
-/// Local UI state for the panel. Held in an ObservableObject because this
-/// Command Line Tools environment cannot load the `@State` macro.
+/// Local UI state of the split console: the selected repository path and the
+/// project filter. Held in an ObservableObject because this environment cannot
+/// load the `@State` macro.
 @MainActor
 final class PanelUIState: ObservableObject {
-    @Published var filter: PanelProjectFilter = .attention
+    @Published var selectedPath: String?
+    @Published var filter = ""
 }
 
-/// Root view of the status panel: attention first, with a visible
-/// Atención/Todos selector and compact cards that open a repository detail
-/// window (S16/S17). All copy follows the system language.
+/// Root view of the panel (S2): a 760 × 600 split console with the project list
+/// on the left, the selected project's detail on the right, and one footer
+/// spanning both columns. Replaces the compact cards and the separate
+/// repository detail window. All copy follows the system language.
 struct MissionControlPanelView: View {
     @ObservedObject var appState: AppState
     let onOpenSettings: () -> Void
-    let onOpenDetail: (_ repoPath: String, _ focusWorktreePath: String?) -> Void
-    let onOpenEngramPanel: (_ repoPath: String) -> Void
-    let onQuit: () -> Void
+    let onOpenEngramPanel: (String) -> Void
+    let onCopyRetakeContext: (String) async -> String?
     @StateObject private var ui = PanelUIState()
+
+    private var now: Date { Date() }
+
+    /// S3: grouped, filtered and ordered rows of the sidebar.
+    private var sections: [ConsoleProjectSection] {
+        ConsoleProjectList.sections(appState.consoleRows, filter: ui.filter)
+    }
+
+    /// S3: the live selection. A nil selection and a selection whose repository
+    /// vanished both fall back to the first row in triage order.
+    private var selectedPath: String? {
+        ConsoleProjectList.selection(in: sections, current: ui.selectedPath)
+    }
+
+    private var selectedSnapshot: RepoSnapshot? {
+        guard let selectedPath,
+              let snapshot = appState.snapshots.first(where: { $0.config.path == selectedPath })
+        else { return nil }
+        return appState.liveSnapshot(for: snapshot)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider().opacity(0.25)
-            ScrollView {
-                VStack(spacing: 12) {
-                    if appState.snapshots.isEmpty {
-                        emptyState
-                    } else {
-                        if !appState.attentionOrder.isEmpty {
-                            sectionTitle(L10n.t("Necesitan atención", "Needs attention"))
-                            ForEach(appState.attentionOrder, id: \.config.path) { snapshot in
-                                ProjectCard(appState: appState, snapshot: snapshot,
-                                            onOpenEngramPanel: {
-                                    onOpenEngramPanel(snapshot.config.path)
-                                }) { focus in
-                                    onOpenDetail(snapshot.config.path, focus)
-                                }
-                            }
-                        }
-                        if ui.filter == .all, !appState.cleanOrder.isEmpty {
-                            sectionTitle(L10n.t("Otros proyectos", "Other projects"))
-                            ForEach(appState.cleanOrder, id: \.config.path) { snapshot in
-                                ProjectCard(appState: appState, snapshot: snapshot,
-                                            onOpenEngramPanel: {
-                                    onOpenEngramPanel(snapshot.config.path)
-                                }) { focus in
-                                    onOpenDetail(snapshot.config.path, focus)
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(14)
+            HStack(spacing: 0) {
+                ConsoleSidebar(appState: appState,
+                               ui: ui,
+                               sections: sections,
+                               selectedPath: selectedPath,
+                               now: now)
+                    .frame(width: 250)
+                Divider().opacity(0.25)
+                detail
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider().opacity(0.25)
-            footer
+            ConsoleFooter(appState: appState, onOpenSettings: onOpenSettings)
         }
-        .frame(width: 380, height: 520)
+        .frame(width: 760, height: 600)
         .background(VisualEffectBackground().ignoresSafeArea())
-        .safeAreaInset(edge: .top, spacing: 0) { filterBar }
-    }
-
-    // MARK: - Pieces
-
-    /// Visible access to every tracked project, clean or paused (S17).
-    @ViewBuilder private var filterBar: some View {
-        if !appState.snapshots.isEmpty, !appState.cleanOrder.isEmpty {
-            HStack {
-                Picker(L10n.t("Proyectos", "Projects"), selection: $ui.filter) {
-                    Text(L10n.t("Atención", "Attention")).tag(PanelProjectFilter.attention)
-                    Text(L10n.t("Todos", "All")).tag(PanelProjectFilter.all)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(width: 170)
-                .accessibilityLabel(L10n.t("Filtro de proyectos", "Project filter"))
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .background(.quaternary.opacity(0.15))
+        .onAppear {
+            if ui.selectedPath == nil { ui.selectedPath = selectedPath }
         }
     }
 
-    private var header: some View {
-        let summary = appState.attentionSummary
-        return HStack(spacing: 8) {
-            Image(systemName: "scope")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.cyan.gradient)
-            Text("Mission Control")
-                .font(.system(size: 15, weight: .semibold))
-            Spacer()
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(summaryLabel(summary))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(summary.affectedProjects == 0 ? Color.secondary : Color.orange)
-                Text(lastRefreshLabel)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            refreshButton
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
+    // MARK: - Detail pane
 
-    private func summaryLabel(_ summary: AttentionSummary) -> String {
-        let projects = L10n.t(summary.affectedProjects == 1 ? "proyecto" : "proyectos",
-                              summary.affectedProjects == 1 ? "project" : "projects")
-        let notices = L10n.t(summary.notices == 1 ? "aviso" : "avisos",
-                             summary.notices == 1 ? "notice" : "notices")
-        return "\(summary.affectedProjects) \(projects) · \(summary.notices) \(notices)"
-    }
-
-    private var lastRefreshLabel: String {
-        guard let last = appState.lastRefresh else { return L10n.t("sin escaneos", "never scanned") }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: last)
-    }
-
-    @ViewBuilder private var refreshButton: some View {
-        if appState.isRefreshing {
-            ProgressView()
-                .controlSize(.small)
-                .padding(.leading, 4)
+    @ViewBuilder private var detail: some View {
+        if appState.config.repos.isEmpty {
+            noProjectsState
+        } else if let snapshot = selectedSnapshot {
+            ConsoleDetailView(appState: appState,
+                              snapshot: snapshot,
+                              now: now,
+                              onOpenSettings: onOpenSettings,
+                              onOpenEngramPanel: onOpenEngramPanel,
+                              onCopyRetakeContext: onCopyRetakeContext)
+                // A different project starts with its own detail state.
+                .id(snapshot.config.path)
         } else {
-            Button {
-                appState.refresh()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.borderless)
-            .controlSize(.small)
-            .padding(.leading, 4)
-            .help(L10n.t("Escanear todos los proyectos", "Scan all projects"))
+            scanningState
         }
     }
 
-    private var emptyState: some View {
+    private var noProjectsState: some View {
         VStack(spacing: 10) {
             Image(systemName: "tray")
                 .font(.system(size: 28, weight: .light))
                 .foregroundStyle(.secondary)
-            Text(appState.config.repos.isEmpty
-                 ? L10n.t("No hay proyectos seguidos", "No projects tracked yet")
-                 : L10n.t("Escaneando…", "Scanning…"))
+                .accessibilityHidden(true)
+            Text(L10n.t("No hay proyectos seguidos", "No projects tracked yet"))
                 .font(.headline)
-            if appState.config.repos.isEmpty {
-                Text(L10n.t("Agregá repositorios para ver PRs, CI, worktrees\ny la última actividad del agente.",
-                            "Add repositories to see PRs, CI, worktrees\nand last agent activity."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Button(L10n.t("Abrir ajustes", "Open Settings"), action: onOpenSettings)
-                    .controlSize(.small)
-                    .padding(.top, 4)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
-    }
-
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var footer: some View {
-        HStack {
-            Text("Dev Mission Control")
-                .font(.caption2)
+            Text(L10n.t("Agrega repositorios…", "Add repositories…"))
+                .font(.caption)
                 .foregroundStyle(.secondary)
-            Spacer()
-            Button(L10n.t("Ajustes", "Settings"), action: onOpenSettings)
+            Button(L10n.t("Abrir ajustes", "Open Settings"), action: onOpenSettings)
                 .controlSize(.small)
-            Button(L10n.t("Salir", "Quit"), action: onQuit)
-                .controlSize(.small)
+                .padding(.top, 4)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(16)
+    }
+
+    private var scanningState: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text(L10n.t("Escaneando…", "Scanning…"))
+                .font(.headline)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(16)
     }
 }
 
-/// Compact repository summary. Clicking the card opens the repository detail
-/// window; clicking the primary notice focuses that notice's worktree (S17).
-struct ProjectCard: View {
+/// Footer spanning both columns (S2): one aggregate per source, the next scan,
+/// and Settings. The periodic timeline keeps the relative times current without
+/// a scan; Quit stays in the status item's right-click menu.
+struct ConsoleFooter: View {
     @ObservedObject var appState: AppState
-    let snapshot: RepoSnapshot
-    /// Primary Engram action: opens the per-project panel window. The TUI
-    /// stays available as a secondary small action inside the Engram row.
-    var onOpenEngramPanel: (() -> Void)? = nil
-    let onOpenDetail: (_ focusWorktreePath: String?) -> Void
-
-    private var items: [AttentionItem] { appState.items(for: snapshot) }
+    let onOpenSettings: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                Text(snapshot.config.id)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Text(worktreeCountLabel)
-                    .font(.caption2)
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            HStack(spacing: 14) {
+                source(ConsoleSource.git, now: context.date)
+                source(ConsoleSource.github, now: context.date)
+                source(ConsoleSource.engram, now: context.date)
+                Spacer(minLength: 8)
+                Text(nextScanLabel(now: context.date))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-            }
-            HStack(spacing: 6) {
-                Text(L10n.t("Principal ·", "Primary ·"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(primaryBranchLabel)
-                    .font(.caption.monospaced())
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                if snapshot.config.isPaused {
-                    Label(L10n.t("Pausado", "Paused"), systemImage: "pause.fill")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.secondary)
+                Button(action: onOpenSettings) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 13))
                 }
-                Text(noticeCountLabel)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(items.isEmpty ? Color.secondary : Color.primary)
+                .buttonStyle(.borderless)
+                .help(L10n.t("Ajustes (⌘,)", "Settings (⌘,)"))
+                .accessibilityLabel(L10n.t("Ajustes", "Settings"))
             }
-            primaryNoticeRow
-            SourceFreshnessRow(snapshot: snapshot,
-                               onOpenEngramPanel: onOpenEngramPanel)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .contentShape(Rectangle())
-        .onTapGesture { onOpenDetail(nil) }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(L10n.t("Proyecto \(snapshot.config.id)", "Project \(snapshot.config.id)"))
     }
 
-    /// The primary notice doubles as the direct shortcut to the problem.
-    @ViewBuilder private var primaryNoticeRow: some View {
-        if let first = items.first {
-            Button {
-                onOpenDetail(first.worktreePath)
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Circle()
-                        .fill(color(for: first.severity))
-                        .frame(width: 6, height: 6)
-                    Text(first.message)
-                        .font(.caption)
-                        .foregroundStyle(first.severity == .info ? Color.secondary : .primary)
-                        .lineLimit(1)
-                    if items.count > 1 {
-                        Text("+\(items.count - 1)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 2)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L10n.t("Abrir detalle: \(first.message)",
-                                       "Open detail: \(first.message)"))
-        } else {
-            Text(primaryReason)
-                .font(.caption)
+    private func source(_ source: ConsoleSource, now: Date) -> some View {
+        let rollup = ConsoleSourceRollup.make(appState.snapshots, source: source)
+        return HStack(spacing: 5) {
+            dot(rollup.dot)
+            Text(rollup.text(lastRefresh: appState.lastRefresh, now: now,
+                             language: L10n.lang))
+                .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+        .help(L10n.t("\(source.label): \(rollup.currentCount) de \(rollup.total) proyectos leídos",
+                     "\(source.label): \(rollup.currentCount) of \(rollup.total) projects read"))
+        .accessibilityElement(children: .combine)
     }
 
-    private var noticeCountLabel: String {
-        let noun = L10n.t(items.count == 1 ? "aviso" : "avisos",
-                          items.count == 1 ? "notice" : "notices")
-        return "\(items.count) \(noun)"
-    }
-
-    private var primaryBranchLabel: String {
-        if let branch = snapshot.git.branch { return branch }
-        return snapshot.git.freshness == .unavailable
-            ? L10n.t("no disponible", "unavailable")
-            : "detached"
-    }
-
-    private var worktreeCountLabel: String {
-        guard snapshot.git.freshness != .unavailable else {
-            return L10n.t("worktrees no disponibles", "worktrees unavailable")
-        }
-        let count = snapshot.git.worktrees.count
-        return "\(count) worktree\(count == 1 ? "" : "s")"
-    }
-
-    private var primaryReason: String {
-        if let reason = items.first?.message { return reason }
-        let sourcesCurrent = snapshot.git.freshness == .current
-            && snapshot.pr.freshness == .current
-            && snapshot.activity.freshness == .current
-        return sourcesCurrent
-            ? L10n.t("Sin hallazgos actuales", "No current findings")
-            : L10n.t("Sin hallazgos actuales · datos incompletos",
-                     "No current findings · incomplete source data")
-    }
-
-    private func color(for severity: AttentionItem.Severity) -> Color {
-        switch severity {
-        case .critical: return .red
-        case .warning: return .orange
-        case .info: return .secondary
-        }
-    }
-}
-
-/// Per-source freshness as one airy row per source with the read time and
-/// relevant data inline: GitHub shows its open-PR count; Engram shows its
-/// latest activity (title and date) plus saved summary, with an action to
-/// open the memories TUI. Connection state stays separate from memory
-/// freshness (S19/S20).
-struct SourceFreshnessRow: View {
-    let snapshot: RepoSnapshot
-    var showsMemoriesAction: Bool = false
-    /// When set, the Engram row's primary action opens the panel window and
-    /// the TUI becomes a secondary, honestly labelled action.
-    var onOpenEngramPanel: (() -> Void)? = nil
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SourceFreshnessBadge(source: "Git", freshness: snapshot.git.freshness,
-                                 lastReadAt: snapshot.git.lastReadAt, error: snapshot.git.error)
-            SourceFreshnessBadge(source: "GitHub", freshness: snapshot.pr.freshness,
-                                 lastReadAt: snapshot.pr.lastReadAt, error: snapshot.pr.error,
-                                 extras: [pullRequestLine].compactMap { $0 })
-            SourceFreshnessBadge(source: "Engram", freshness: snapshot.activity.freshness,
-                                 lastReadAt: snapshot.activity.lastReadAt,
-                                 error: snapshot.activity.error,
-                                 extras: [activityDateLine, summaryLine].compactMap { $0 },
-                                 detailLine: activityTitleLine,
-                                 showsMemoriesAction: showsMemoriesAction,
-                                 onOpenEngramPanel: onOpenEngramPanel)
-        }
-        .accessibilityElement(children: .contain)
-    }
-
-    private var pullRequestLine: String? {
-        guard snapshot.pr.freshness == .current else { return nil }
-        let count = snapshot.pr.prs.count
-        if count == 0 { return L10n.t("Sin PRs abiertas", "No open PRs") }
-        return L10n.t("\(count) PR\(count == 1 ? "" : "s") abierta\(count == 1 ? "" : "s")",
-                      "\(count) open PR\(count == 1 ? "" : "s")")
-    }
-
-    private var activityDateLine: String? {
-        guard let activity = snapshot.activity.activity else { return nil }
-        return "\(L10n.t("Actividad", "Activity")) · \(activity.date.formatted(date: .abbreviated, time: .shortened))"
-    }
-
-    private var activityTitleLine: String? {
-        guard let activity = snapshot.activity.activity else { return nil }
-        return "\(L10n.t("Actividad", "Activity")): \(activity.title)"
-    }
-
-    private var summaryLine: String? {
-        guard let savedSummary = snapshot.activity.summary else {
-            return snapshot.activity.freshness == .current
-                ? L10n.t("Sin resumen guardado", "No saved summary") : nil
-        }
-        return "\(L10n.t("Resumen guardado", "Saved summary")) · \(savedSummary.date.formatted(date: .abbreviated, time: .shortened))"
-    }
-}
-
-/// Local error state for the memories action of one freshness row.
-@MainActor
-private final class BadgeRowUI: ObservableObject {
-    @Published var memoriesError: String?
-}
-
-struct SourceFreshnessBadge: View {
-    let source: String
-    let freshness: SourceFreshness
-    let lastReadAt: Date?
-    let error: String?
-    var extras: [String] = []
-    var detailLine: String? = nil
-    var showsMemoriesAction: Bool = false
-    var onOpenEngramPanel: (() -> Void)? = nil
-    @StateObject private var ui = BadgeRowUI()
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 5, height: 5)
-                .padding(.top, 3)
-            Text(source)
-                .font(.system(size: 9, weight: .semibold))
-                .frame(width: 44, alignment: .leading)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(extras.isEmpty ? stateText : ([stateText] + extras).joined(separator: " · "))
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                if let detailLine {
-                    Text(detailLine)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-            Spacer(minLength: 2)
-            if showsEngramAction, source == "Engram", freshness != .unavailable {
-                if let onOpenEngramPanel {
-                    Button {
-                        onOpenEngramPanel()
-                    } label: {
-                        Label(L10n.t("Abrir panel", "Open panel"), systemImage: "square.grid.2x2")
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.mini)
-                    .help(L10n.t("Abre el panel de memorias de Engram de este proyecto",
-                                 "Opens this project's Engram memories panel"))
-                }
-                Button {
-                    openTUI()
-                } label: {
-                    Label(L10n.t("TUI global", "Global TUI"), systemImage: "terminal")
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.mini)
-                .help(L10n.t("Abre el TUI de Engram en Terminal. Es global y tarda unos segundos (~5 s).",
-                             "Opens the Engram TUI in Terminal. It is global and takes a few seconds (~5 s)."))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .help(helpText)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(helpText)
-        .alert(L10n.t("No se pudieron abrir las memorias", "Could not open the memories"),
-               isPresented: Binding(
-            get: { ui.memoriesError != nil },
-            set: { if !$0 { ui.memoriesError = nil } }
-        )) {
-            Button("OK", role: .cancel) { ui.memoriesError = nil }
-        } message: {
-            Text(ui.memoriesError ?? L10n.t("Error desconocido", "Unknown error"))
-        }
-    }
-
-    private var showsEngramAction: Bool {
-        showsMemoriesAction || onOpenEngramPanel != nil
-    }
-
-    /// Secondary Engram action: the shared TUI launcher. The TUI is global and
-    /// slow, which the label and help text state honestly (S7).
-    private func openTUI() {
-        Task { @MainActor in
-            if let error = await EngramTUI.open() { ui.memoriesError = error }
-        }
-    }
-
-    private var statusColor: Color {
-        switch freshness {
-        case .current: return .green
-        case .stale: return .orange
-        case .unavailable: return .secondary
-        }
-    }
-
-    /// S19: the connection state is explicit and carries the visible read
-    /// time; Engram's current read never claims the memory matches the code.
-    private var stateText: String {
-        switch freshness {
+    /// Green when every project's read is current, orange when some read is not,
+    /// hollow when there is no current read at all (S2).
+    @ViewBuilder private func dot(_ dot: ConsoleSourceRollup.Dot) -> some View {
+        switch dot {
         case .current:
-            let base = source == "Engram" ? L10n.t("Conectado", "Connected") : L10n.t("actual", "current")
-            return "\(base) · \(shortReadTime)"
+            Circle().fill(Color.green).frame(width: 7, height: 7)
         case .stale:
-            return "\(L10n.t("antiguo", "stale")) · \(shortReadTime)"
-        case .unavailable:
-            return source == "Engram" ? L10n.t("Sin conexión", "No connection") : L10n.t("no disponible", "unavailable")
-        }
-    }
-
-    private var shortReadTime: String {
-        lastReadAt?.formatted(date: .omitted, time: .shortened) ?? L10n.t("sin lectura", "no read")
-    }
-
-    private var helpText: String {
-        var parts = ["\(source): \(stateText)"]
-        if let lastReadAt {
-            parts.append("\(L10n.t("última lectura", "last read")) \(lastReadAt.formatted(date: .abbreviated, time: .standard))")
-        } else {
-            parts.append(L10n.t("sin lecturas exitosas", "no successful reads"))
-        }
-        for extra in extras { parts.append(extra) }
-        if let detailLine { parts.append(detailLine) }
-        if let error { parts.append("\(L10n.t("error actual", "current error")): \(error)") }
-        return parts.joined(separator: " · ")
-    }
-}
-
-/// Local UI state for one worktree's asynchronous actions.
-@MainActor
-final class WorktreeActionState: ObservableObject {
-    @Published var isLoadingDiff = false
-    @Published var showingDiff = false
-    @Published var diffText = ""
-    @Published var actionError: String?
-}
-
-/// Detailed, read-only triage row for a linked worktree. When `isFocused`,
-/// the row is highlighted because a notice led here (S17).
-struct WorktreeTriageRow: View {
-    let worktree: WorktreeInfo
-    let severity: AttentionItem.Severity
-    let editorApplicationPath: String?
-    let pullRequest: PRInfo?
-    var isFocused: Bool = false
-    let onConfigureEditor: () -> Void
-    @StateObject private var actionState = WorktreeActionState()
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 7) {
+            Circle().fill(Color.orange).frame(width: 7, height: 7)
+        case .none:
             Circle()
-                .fill(severityColor)
-                .frame(width: 6, height: 6)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(worktree.name)
-                        .font(.caption.weight(.semibold))
-                    Text(worktree.branch ?? "detached")
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Text(statusSummary)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(worktree.path)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-            }
-            Spacer(minLength: 2)
-            Menu {
-                if editorApplicationPath != nil {
-                    Button {
-                        openEditor()
-                    } label: {
-                        Label(L10n.t("Abrir en editor", "Open in Editor"),
-                              systemImage: "square.and.pencil")
-                    }
-                } else {
-                    Button {
-                        onConfigureEditor()
-                    } label: {
-                        Label(L10n.t("Configurar editor…", "Set up Editor…"),
-                              systemImage: "gearshape")
-                    }
-                }
-
-                Button {
-                    openTerminal()
-                } label: {
-                    Label(L10n.t("Abrir en Terminal", "Open in Terminal"),
-                          systemImage: "terminal")
-                }
-
-                Button {
-                    showDiff()
-                } label: {
-                    Label(actionState.isLoadingDiff
-                          ? L10n.t("Preparando diff…", "Preparing Diff…")
-                          : L10n.t("Ver diff", "Show Diff"),
-                          systemImage: "doc.text.magnifyingglass")
-                }
-                .disabled(actionState.isLoadingDiff)
-
-                if let pullRequest {
-                    Button {
-                        openPullRequest(pullRequest)
-                    } label: {
-                        Label(L10n.t("Abrir PR #\(pullRequest.number)",
-                                     "Open PR #\(pullRequest.number)"),
-                              systemImage: "arrow.up.right.square")
-                    }
-                }
-
-                Divider()
-                Button(action: revealInFinder) {
-                    Label(L10n.t("Mostrar en Finder", "Reveal in Finder"),
-                          systemImage: "folder")
-                }
-                Button(action: copyPath) {
-                    Label(L10n.t("Copiar ruta", "Copy Path"), systemImage: "doc.on.doc")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .buttonStyle(.borderless)
-            .controlSize(.small)
-            .help(L10n.t("Acciones para \(worktree.name)", "Actions for \(worktree.name)"))
-            .accessibilityLabel(L10n.t("Acciones para \(worktree.name)",
-                                       "Actions for \(worktree.name)"))
-        }
-        .padding(.vertical, 3)
-        .padding(.horizontal, isFocused ? 6 : 0)
-        .background {
-            if isFocused {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.14))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1)
-                    }
-            }
-        }
-        .sheet(isPresented: $actionState.showingDiff) {
-            WorktreeDiffSheet(worktreeName: worktree.name, diff: actionState.diffText)
-        }
-        .alert(L10n.t("Falló la acción del worktree", "Worktree Action Failed"),
-               isPresented: Binding(
-            get: { actionState.actionError != nil },
-            set: { if !$0 { actionState.actionError = nil } }
-        )) {
-            Button("OK", role: .cancel) { actionState.actionError = nil }
-        } message: {
-            Text(actionState.actionError ?? L10n.t("Error desconocido", "Unknown error"))
+                .strokeBorder(Color.secondary, lineWidth: 1.5)
+                .frame(width: 7, height: 7)
         }
     }
 
-    /// Last-commit age stays informational; it is neither the local
-    /// modification time nor agent activity (S19).
-    private var statusSummary: String {
-        let commitAge: String
-        if worktree.lastCommitAt == nil {
-            commitAge = L10n.t("sin fecha de último commit", "no last-commit date")
-        } else if worktree.ageDays == 0 {
-            commitAge = L10n.t("último commit hoy", "last commit today")
-        } else {
-            commitAge = L10n.t("último commit hace \(worktree.ageDays) \(worktree.ageDays == 1 ? "día" : "días")",
-                               "last commit \(worktree.ageDays) day\(worktree.ageDays == 1 ? "" : "s") ago")
+    private func nextScanLabel(now: Date) -> String {
+        if appState.isRefreshing {
+            return L10n.t("Escaneando…", "Scanning…")
         }
-
-        var parts = [
-            "Staged \(worktree.changes.staged)",
-            "Unstaged \(worktree.changes.unstaged)",
-            "Untracked \(worktree.changes.untracked)"
-        ]
-        if worktree.changes.conflicts > 0 {
-            parts.append("\(L10n.t("Conflictos", "Conflicts")) \(worktree.changes.conflicts)")
+        let interval = TimeInterval(appState.config.refreshIntervalMinutes * 60)
+        guard let lastRefresh = appState.lastRefresh else {
+            let minutes = appState.config.refreshIntervalMinutes
+            return L10n.t("Próximo escaneo en \(minutes) min",
+                          "Next scan in \(minutes) min")
         }
-        parts.append(commitAge)
-        return parts.joined(separator: " · ")
-    }
-
-    private var severityColor: Color {
-        switch severity {
-        case .critical: return .red
-        case .warning: return .orange
-        case .info: return .secondary
-        }
-    }
-
-    private func openEditor() {
-        guard let editorApplicationPath else {
-            actionState.actionError = L10n.t("Configurá un editor en Ajustes.",
-                                             "Set up an editor in Settings first.")
-            return
-        }
-        launch(WorktreeActionCommand.openApplication(
-            appPath: editorApplicationPath, worktreePath: worktree.path))
-    }
-
-    private func openTerminal() {
-        launch(WorktreeActionCommand.openTerminal(worktreePath: worktree.path))
-    }
-
-    private func launch(_ command: WorktreeActionCommand) {
-        Task { @MainActor in
-            let error = await Task.detached(priority: .userInitiated) { () -> String? in
-                do {
-                    _ = try ProcessRunner().run(command.executable, command.arguments, in: nil)
-                    return nil
-                } catch {
-                    return error.localizedDescription
-                }
-            }.value
-            if let error { actionState.actionError = error }
-        }
-    }
-
-    private func showDiff() {
-        actionState.isLoadingDiff = true
-        let command = WorktreeActionCommand.gitDiff(worktreePath: worktree.path)
-        Task { @MainActor in
-            let result = await Task.detached(priority: .userInitiated) { () -> (String?, String?) in
-                do {
-                    return (try ProcessRunner().run(command.executable, command.arguments, in: nil), nil)
-                } catch {
-                    return (nil, error.localizedDescription)
-                }
-            }.value
-            actionState.isLoadingDiff = false
-            if let error = result.1 {
-                actionState.actionError = error
-            } else {
-                actionState.diffText = result.0 ?? ""
-                actionState.showingDiff = true
-            }
-        }
-    }
-
-    private func openPullRequest(_ pullRequest: PRInfo) {
-        guard let url = pullRequest.webURL else {
-            actionState.actionError = L10n.t("Esta PR no tiene URL HTTPS segura.",
-                                             "This pull request has no safe HTTPS URL.")
-            return
-        }
-        if !NSWorkspace.shared.open(url) {
-            actionState.actionError = L10n.t("No se pudo abrir la PR #\(pullRequest.number).",
-                                             "Could not open pull request #\(pullRequest.number).")
-        }
-    }
-
-    private func revealInFinder() {
-        NSWorkspace.shared.activateFileViewerSelecting([
-            URL(fileURLWithPath: worktree.path, isDirectory: true)
-        ])
-    }
-
-    private func copyPath() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(worktree.path, forType: .string)
-    }
-}
-
-private struct WorktreeDiffSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let worktreeName: String
-    let diff: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Diff · \(worktreeName)")
-                    .font(.headline)
-                Spacer()
-                Button(L10n.t("Cerrar", "Done")) { dismiss() }
-            }
-            Divider()
-            if diff.isEmpty {
-                Text(L10n.t("No hay cambios tracked respecto a HEAD. Los archivos untracked no se incluyen.",
-                            "No tracked changes relative to HEAD. Untracked files are not included."))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            } else {
-                ScrollView([.horizontal, .vertical]) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(DiffParser.parse(diff)) { line in
-                            Text(line.text)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(color(for: line.kind))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(rowBackground(for: line.kind))
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(16)
-        .frame(minWidth: 620, minHeight: 420)
-    }
-
-    /// S20: additions render green, removals red; metadata dims and hunk
-    /// headers use the accent color.
-    private func color(for kind: DiffLineKind) -> Color {
-        switch kind {
-        case .addition: return .green
-        case .removal: return .red
-        case .hunkHeader: return .accentColor
-        case .meta: return .secondary
-        case .context: return .primary
-        }
-    }
-
-    private func rowBackground(for kind: DiffLineKind) -> Color {
-        switch kind {
-        case .addition: return Color.green.opacity(0.12)
-        case .removal: return Color.red.opacity(0.12)
-        default: return .clear
-        }
+        let remaining = max(0, lastRefresh.addingTimeInterval(interval).timeIntervalSince(now))
+        let minutes = Int((remaining / 60).rounded(.up))
+        return L10n.t("Próximo escaneo en \(minutes) min", "Next scan in \(minutes) min")
     }
 }
