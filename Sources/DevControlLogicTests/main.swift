@@ -524,6 +524,7 @@ worktreeActionTests()
 splitConsoleCoreTests()
 ignoredWorktreeFolderTests()
 splitConsolePanelTests()
+changeBreakdownTests()
 // ghScannerTests()    // T4
 // engramScannerTests() // T5
 

@@ -187,6 +187,15 @@ public enum ConsoleWorktreeSummary {
                                     text: language.pick(es: "Limpio", en: "Clean"))
     }
 
+    /// Prior S7/S10: staged, unstaged and untracked counts stay separate under
+    /// the state pill. Zero categories are omitted, and conflicts are left to
+    /// the pill. The labels are technical terms and stay in English.
+    public static func breakdown(_ changes: ChangeCounts) -> [String] {
+        [("Staged", changes.staged), ("Unstaged", changes.unstaged), ("Untracked", changes.untracked)]
+            .filter { $0.1 > 0 }
+            .map { "\($0.0) \($0.1)" }
+    }
+
     /// Pending files across the primary checkout and every linked worktree,
     /// the sidebar's "N pending changes" reason (S3).
     public static func pendingChangeCount(_ snapshot: RepoSnapshot) -> Int {

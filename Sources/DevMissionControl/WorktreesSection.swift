@@ -117,7 +117,8 @@ struct WorktreesSection: View {
                                  isDirty: snapshot.git.changes.isDirty,
                                  ageDays: 0,
                                  changes: snapshot.git.changes),
-                    language: L10n.lang))
+                    language: L10n.lang),
+                breakdown: ConsoleWorktreeSummary.breakdown(snapshot.git.changes))
                 .frame(width: stateColumnWidth, alignment: .leading)
             commitAgeText(snapshot.git.lastCommit?.date)
                 .frame(width: commitColumnWidth, alignment: .trailing)
@@ -131,7 +132,8 @@ struct WorktreesSection: View {
         HStack(alignment: .center, spacing: 12) {
             nameCell(name: worktree.name, sub: worktree.branch ?? detachedLabel)
             WorktreeStatePillView(state: ConsoleWorktreeSummary.state(worktree,
-                                                                     language: L10n.lang))
+                                                                     language: L10n.lang),
+                                  breakdown: ConsoleWorktreeSummary.breakdown(worktree.changes))
                 .frame(width: stateColumnWidth, alignment: .leading)
             commitAgeText(worktree.lastCommitAt)
                 .frame(width: commitColumnWidth, alignment: .trailing)
@@ -317,15 +319,26 @@ struct WorktreesSection: View {
 /// gray. The text carries the information; the color only reinforces it.
 struct WorktreeStatePillView: View {
     let state: ConsoleWorktreeState
+    /// Prior S7/S10: non-zero staged/unstaged/untracked counts, one per line.
+    var breakdown: [String] = []
 
     var body: some View {
-        Text(state.text)
-            .font(.system(size: 11))
-            .foregroundStyle(color)
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 1)
-            .background(color.opacity(0.13), in: Capsule())
+        VStack(alignment: .leading, spacing: 2) {
+            Text(state.text)
+                .font(.system(size: 11))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 1)
+                .background(color.opacity(0.13), in: Capsule())
+            ForEach(breakdown, id: \.self) { line in
+                Text(line)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var color: Color {

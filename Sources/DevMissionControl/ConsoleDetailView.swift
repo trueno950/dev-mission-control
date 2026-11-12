@@ -437,16 +437,36 @@ struct ConsoleDetailView: View {
     // MARK: - Per-project source freshness (S5)
 
     private var sourcesLine: some View {
-        HStack(spacing: 14) {
-            sourceLine("Git", snapshot.git.freshness, snapshot.git.lastReadAt,
-                       snapshot.git.error)
-            sourceLine("GitHub", snapshot.pr.freshness, snapshot.pr.lastReadAt,
-                       snapshot.pr.error)
-            sourceLine("Engram", snapshot.activity.freshness,
-                       snapshot.activity.lastReadAt, snapshot.activity.error)
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 14) {
+                sourceLine("Git", snapshot.git.freshness, snapshot.git.lastReadAt,
+                           snapshot.git.error)
+                sourceLine("GitHub", snapshot.pr.freshness, snapshot.pr.lastReadAt,
+                           snapshot.pr.error)
+                sourceLine("Engram", snapshot.activity.freshness,
+                           snapshot.activity.lastReadAt, snapshot.activity.error)
+                Spacer(minLength: 0)
+            }
+            // S5: a retained (stale) value never hides the current failure.
+            ForEach(staleErrors, id: \.self) { line in
+                Text(line)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
         }
         .padding(.top, 4)
+    }
+
+    /// Current errors of sources whose last good value is retained as stale.
+    private var staleErrors: [String] {
+        [("Git", snapshot.git.freshness, snapshot.git.error),
+         ("GitHub", snapshot.pr.freshness, snapshot.pr.error),
+         ("Engram", snapshot.activity.freshness, snapshot.activity.error)]
+            .compactMap { label, freshness, error in
+                guard freshness == .stale, let error else { return nil }
+                return "\(label) · \(L10n.t("error actual", "current error")): \(error)"
+            }
     }
 
     /// S5: each source keeps its own visible freshness in this project, with

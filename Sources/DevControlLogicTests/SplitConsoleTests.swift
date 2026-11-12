@@ -607,3 +607,16 @@ func splitConsolePanelTests() {
               "no current error offers no login command")
     }
 }
+
+/// Prior S7/S10: staged, unstaged and untracked stay separated in the
+/// worktree table; zero categories are not shown.
+func changeBreakdownTests() {
+    checkEqual(ConsoleWorktreeSummary.breakdown(ChangeCounts(staged: 1, unstaged: 3, untracked: 2)),
+               ["Staged 1", "Unstaged 3", "Untracked 2"],
+               "breakdown keeps staged, unstaged and untracked separate")
+    checkEqual(ConsoleWorktreeSummary.breakdown(ChangeCounts(unstaged: 4)), ["Unstaged 4"],
+               "breakdown omits zero categories")
+    checkEqual(ConsoleWorktreeSummary.breakdown(ChangeCounts(conflicts: 2)), [],
+               "conflicts alone add no breakdown line (the pill already names them)")
+    checkEqual(ConsoleWorktreeSummary.breakdown(.none), [], "a clean checkout has no breakdown")
+}

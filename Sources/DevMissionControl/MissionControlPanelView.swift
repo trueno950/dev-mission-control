@@ -79,9 +79,29 @@ struct MissionControlPanelView: View {
                               onCopyRetakeContext: onCopyRetakeContext)
                 // A different project starts with its own detail state.
                 .id(snapshot.config.path)
-        } else {
+        } else if appState.snapshots.isEmpty {
             scanningState
+        } else {
+            noMatchesState
         }
+    }
+
+    /// A filter that matches nothing is said plainly, never shown as a scan.
+    private var noMatchesState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(L10n.t("Ningún proyecto coincide con «\(ui.filter)»",
+                        "No projects match “\(ui.filter)”"))
+                .font(.headline)
+                .multilineTextAlignment(.center)
+            Button(L10n.t("Limpiar filtro", "Clear filter")) { ui.filter = "" }
+                .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(16)
     }
 
     private var noProjectsState: some View {

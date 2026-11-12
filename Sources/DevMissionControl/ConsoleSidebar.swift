@@ -99,7 +99,7 @@ struct ConsoleSidebar: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
                 ForEach(sections) { section in
-                    Text(section.group.sidebarTitle.uppercased())
+                    Text("\(section.group.sidebarTitle.uppercased()) · \(section.rows.count)")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
